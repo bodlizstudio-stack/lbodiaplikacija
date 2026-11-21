@@ -1,29 +1,9 @@
-// Vercel Serverless Function: Real Gemini AI invocation (API key stays strictly server-side)
-declare const process: { env: Record<string, string | undefined> };
-
-interface VercelRequestLike {
-  method?: string;
-  headers: Record<string, string | string[] | undefined>;
-  body?: unknown;
-  socket?: { remoteAddress?: string };
-}
-
-interface VercelResponseLike {
-  status: (code: number) => VercelResponseLike;
-  json: (payload: unknown) => void;
-  setHeader: (name: string, value: string) => void;
-}
-
-interface IncomingMessageItem {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
+// Vercel Serverless Function: Real Gemini AI invocation (CommonJS for Vercel Node runtime)
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX_REQUESTS = 20;
-const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+const rateBuckets = new Map();
 
-function checkRateLimit(ip: string): boolean {
+function checkRateLimit(ip) {
   const now = Date.now();
   const entry = rateBuckets.get(ip);
   if (!entry || now > entry.resetAt) {
@@ -37,11 +17,11 @@ function checkRateLimit(ip: string): boolean {
   return true;
 }
 
-function buildSystemPrompt(
-  language: 'sl' | 'en',
-  authorizedContext: Record<string, unknown> | undefined
-): string {
-  const langLabel = language === 'en' ? 'English' : 'Slovenian (natural, respectful, warm, grammatically proper Slovenian)';
+function buildSystemPrompt(language, authorizedContext) {
+  const langLabel =
+    language === 'en'
+      ? 'English'
+      : 'Slovenian (natural, respectful, warm, grammatically proper Slovenian)';
   const ctxString = authorizedContext ? JSON.stringify(authorizedContext, null, 2) : 'None shared.';
 
   return [
@@ -62,7 +42,7 @@ function buildSystemPrompt(
   ].join('\n');
 }
 
-export default async function handler(req: VercelRequestLike, res: VercelResponseLike): Promise<void> {
+module.exports = async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   if (req.method !== 'POST') {
@@ -96,20 +76,20 @@ export default async function handler(req: VercelRequestLike, res: VercelRespons
     return;
   }
 
-  let bodyObj: Record<string, unknown> = {};
+  let bodyObj = {};
   try {
     bodyObj =
       typeof req.body === 'string'
-        ? (JSON.parse(req.body) as Record<string, unknown>)
-        : ((req.body as Record<string, unknown>) || {});
+        ? JSON.parse(req.body)
+        : req.body && typeof req.body === 'object'
+        ? req.body
+        : {};
   } catch {
     res.status(400).json({ ok: false, code: 'INVALID_JSON', error: 'Invalid JSON request body.' });
     return;
   }
 
-  const rawMessages = Array.isArray(bodyObj.messages)
-    ? (bodyObj.messages as IncomingMessageItem[])
-    : [];
+  const rawMessages = Array.isArray(bodyObj.messages) ? bodyObj.messages : [];
   const messages = rawMessages
     .filter(
       (m) =>
@@ -125,10 +105,10 @@ export default async function handler(req: VercelRequestLike, res: VercelRespons
     return;
   }
 
-  const language: 'sl' | 'en' = bodyObj.language === 'en' ? 'en' : 'sl';
+  const language = bodyObj.language === 'en' ? 'en' : 'sl';
   const authorizedContext =
     bodyObj.authorizedContext && typeof bodyObj.authorizedContext === 'object'
-      ? (bodyObj.authorizedContext as Record<string, unknown>)
+      ? bodyObj.authorizedContext
       : undefined;
 
   const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -170,14 +150,9 @@ export default async function handler(req: VercelRequestLike, res: VercelRespons
       return;
     }
 
-    const data = (await geminiRes.json()) as {
-      candidates?: Array<{
-        content?: { parts?: Array<{ text?: string }> };
-      }>;
-    };
-
+    const data = await geminiRes.json();
     const reply =
-      data.candidates?.[0]?.content?.parts
+      data?.candidates?.[0]?.content?.parts
         ?.map((p) => p.text || '')
         .join('')
         .trim() || '';
@@ -196,11 +171,11 @@ export default async function handler(req: VercelRequestLike, res: VercelRespons
       reply,
       model: modelName,
     });
-  } catch (err: unknown) {
+  } catch (err) {
     res.status(502).json({
       ok: false,
       code: 'AI_NETWORK_ERROR',
       error: err instanceof Error ? err.message : 'Failed to connect to Gemini API.',
     });
   }
-}
+};

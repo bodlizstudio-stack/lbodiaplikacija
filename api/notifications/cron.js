@@ -1,18 +1,5 @@
-// Vercel Serverless Function: Idempotent Scheduled Reminder Dispatch Endpoint
-declare const process: { env: Record<string, string | undefined> };
-
-interface VercelRequestLike {
-  method?: string;
-  headers: Record<string, string | string[] | undefined>;
-}
-
-interface VercelResponseLike {
-  status: (code: number) => VercelResponseLike;
-  json: (payload: unknown) => void;
-  setHeader: (name: string, value: string) => void;
-}
-
-export default async function handler(req: VercelRequestLike, res: VercelResponseLike): Promise<void> {
+// Vercel Serverless Function: Idempotent Scheduled Reminder Dispatch Endpoint (CommonJS)
+module.exports = async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -44,4 +31,4 @@ export default async function handler(req: VercelRequestLike, res: VercelRespons
         ? 'Background push scheduler verified and ready.'
         : 'In-app & local native OS notifications active. Background Web Push while browser is closed requires VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, and a cloud KV/Postgres subscription store.',
   });
-}
+};
