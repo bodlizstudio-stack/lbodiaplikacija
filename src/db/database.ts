@@ -1,21 +1,34 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  AIConversation,
   Affirmation,
+  BiweeklyVisionReview,
+  DailyCheckIn,
   DailyHabitRecord,
   DailyJournalEntry,
+  DailyReflectionEntry,
   DailySummary,
   FocusSession,
   Goal,
+  GratitudeEntry,
   Habit,
+  IdealDayPlan,
+  InAppNotificationItem,
+  LifestyleVisionSections,
+  LifestyleVisionVersion,
   ManifestationEntry,
   NoFapHistoryEntry,
   NoFapState,
+  NutritionEntry,
+  NutritionImportRecord,
   PastSelfEntry,
   PhysiqueEntry,
+  PrayerEntry,
   UserSettings,
   WeeklyReview,
   WhyIStartedData,
+  WorkoutLog,
 } from '../types';
 import {
   DEFAULT_USER_SETTINGS,
@@ -24,6 +37,14 @@ import {
   SEED_GOALS,
   SEED_HABITS,
 } from '../data/seedData';
+import {
+  DEFAULT_AI_PRIVACY,
+  DEFAULT_DASHBOARD_SECTIONS,
+  DEFAULT_DISCIPLINE_PRIVACY,
+  DEFAULT_NUTRITION_TARGETS,
+  REMINDER_MESSAGE_LIBRARY,
+  createDefaultReminderConfigs,
+} from '../data/faithData';
 import {
   calculateDailyDisciplineScore,
   getLjubljanaDateString,
@@ -49,10 +70,31 @@ export interface CompleteAppState {
   goals: Goal[];
   unlockedAchievements: Record<string, string>; // badgeId -> unlockedAt ISO
   pastSelfEntries?: PastSelfEntry[];
+
+  // LBODI 2.0 collections
+  gratitudeEntries?: GratitudeEntry[];
+  prayerEntries?: PrayerEntry[];
+  bibleReadingProgress?: Record<string, number[]>; // planId -> completed day numbers
+  verseNotes?: Record<string, string>; // verseId -> personal reflection note
+  dailyReflections?: Record<string, DailyReflectionEntry>;
+  visionDraft?: {
+    sections: LifestyleVisionSections;
+    idealDay: IdealDayPlan;
+    visionStatement: string;
+    updatedAt: string;
+  };
+  visionVersions?: LifestyleVisionVersion[];
+  biweeklyVisionReviews?: BiweeklyVisionReview[];
+  workoutLogs?: WorkoutLog[];
+  dailyCheckIns?: Record<string, DailyCheckIn>;
+  nutritionEntries?: Record<string, NutritionEntry>;
+  nutritionImports?: NutritionImportRecord[];
+  aiConversations?: AIConversation[];
+  inAppNotifications?: InAppNotificationItem[];
 }
 
 const STORAGE_KEY = 'GET_UP_LUKA_SQLITE_SNAPSHOT_V4';
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 export const INITIAL_NOFAP_STREAK_SECONDS = 298 * 86400 + 22 * 3600 + 36 * 60 + 30;
 
 let sqliteDb: any = null;
@@ -215,6 +257,110 @@ function createInitialState(): CompleteAppState {
       nofap_30_badge: nowIso,
     },
     pastSelfEntries: [],
+    gratitudeEntries: [
+      {
+        id: `grat_${todayStr}_seed`,
+        date: todayStr,
+        mainText:
+          'Hvaležen sem Bogu za nov dan, zdravje, družino in milost, da lahko vsako jutro začnem znova.',
+        threeBlessings: [
+          'Mirno jutro in jasne misli',
+          'Zdravo telo za delo in trening',
+          'Priložnost za duhovno in osebno rast',
+        ],
+        dailyPrayer:
+          'Gospod Jezus, hvala Ti za Tvojo zvestobo. Vodi me danes v ponižnosti, ljubezni in disciplini.',
+        category: 'faith',
+        isFavorite: true,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+    ],
+    prayerEntries: [
+      {
+        id: 'prayer_seed_1',
+        title: 'Jutranja izročitev dneva',
+        text: 'Gospod Jezus Kristus, izročam Ti svoje misli, delo in odnose. Pomagaj mi hoditi po Tvoji besedi z ljubeznijo, ponižnostjo in zbranostjo.',
+        date: todayStr,
+        category: 'guidance',
+        status: 'in_prayer',
+        reflection: 'Molitev za jasnost in notranji mir.',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+    ],
+    bibleReadingProgress: {},
+    verseNotes: {},
+    dailyReflections: {},
+    visionDraft: {
+      sections: {
+        faith:
+          'Želim imeti iskren, vsakodneven odnos z Jezusom Kristusom skozi jutranjo molitev, branje Svetega pisma in ponižno služenje bližnjim.',
+        bodyHealth:
+          'Želim skrbeti za svoje telo kot za darilo: redni treningi moči, kakovosten spanec, čista prehrana in stabilna energija brez skrajnosti.',
+        discipline:
+          'Zvestoba majhnim dnevnim obveznostim, čistost uma, manj nepotrebnega časa pred zasloni in mirna samokontrola v vsakem trenutku.',
+        workPurpose:
+          'Pošteno, predano delo z dodano vrednostjo, nenehno učenje ter finančna urejenost, ki služi družini in dobrim namenom.',
+        relationships:
+          'Več potrpežljivosti, poslušanja, odpuščanja in konkretne prijaznosti do družine, prijateljev in sodelavcev.',
+        personalIdentity:
+          'Moški vere, miru, resnicoljubnosti in vztrajnosti, ki ne išče vrednosti v zunanjem aplavzu, temveč v zvestobi Kristusu.',
+      },
+      idealDay: {
+        morning: 'Zgodnje vstajanje, jutranja molitev, branje Svetega pisma in hvaležnost.',
+        workStudy: '2 bloka globokega dela ali študija brez motenj telefona.',
+        fitness: 'Trening moči ali hiter sprehod na svežem zraku ter gibanje čez dan.',
+        meals: 'Zmerni, polnovredni obroki z dovolj beljakovinami in čiste vode.',
+        prayer: 'Kratka opoldanska ustavitev z Bogom ter iskrena večerna molitev.',
+        evening: 'Pregled dneva, zapis treh blagoslovov in priprava na jutrišnji dan.',
+        sleep: 'Miren odhod v posteljo brez zaslonov vsaj 30 minut pred spanjem.',
+      },
+      visionStatement:
+        'Vsak dan hodim bližje Jezusu Kristusu, odgovorno skrbim za svoje telo in čas ter z vztrajnostjo, ponižnostjo in ljubeznijo gradim mirno, osmišljeno življenje.',
+      updatedAt: nowIso,
+    },
+    visionVersions: [
+      {
+        id: 'vision_v1',
+        versionNumber: 1,
+        sections: {
+          faith:
+            'Želim imeti iskren, vsakodneven odnos z Jezusom Kristusom skozi jutranjo molitev, branje Svetega pisma in ponižno služenje bližnjim.',
+          bodyHealth:
+            'Želim skrbeti za svoje telo kot za darilo: redni treningi moči, kakovosten spanec, čista prehrana in stabilna energija.',
+          discipline:
+            'Zvestoba majhnim dnevnim obveznostim, čistost uma in mirna samokontrola.',
+          workPurpose:
+            'Pošteno, predano delo in finančna urejenost, ki služi dobrim namenom.',
+          relationships:
+            'Potrpežljivost, odpuščanje in prijaznost do družine ter prijateljev.',
+          personalIdentity:
+            'Moški vere, miru in zvestobe Kristusu.',
+        },
+        idealDay: {
+          morning: 'Jutranja molitev, Sveto pismo in miren začetek dneva.',
+          workStudy: 'Zbrano delo brez nepotrebnih motenj.',
+          fitness: 'Trening moči ali aktiven sprehod.',
+          meals: 'Polnovredna prehrana in voda.',
+          prayer: 'Kratka molitev sredi dneva in zvečer.',
+          evening: 'Zapis hvaležnosti Gospodu.',
+          sleep: '7,5–8 ur kakovostnega spanca.',
+        },
+        visionStatement:
+          'Vsak dan hodim bližje Jezusu Kristusu, odgovorno skrbim za svoje telo in čas ter gradim mirno, disciplinirano in ljubeče življenje.',
+        isDraft: false,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+    ],
+    biweeklyVisionReviews: [],
+    workoutLogs: [],
+    dailyCheckIns: {},
+    nutritionEntries: {},
+    nutritionImports: [],
+    aiConversations: [],
+    inAppNotifications: [],
   };
 
   const withToday = ensureTodayHabitRecords(initial, todayStr);
@@ -329,6 +475,7 @@ export async function loadPersistedState(): Promise<CompleteAppState> {
 }
 
 function migrateStateIfNeeded(state: CompleteAppState): CompleteAppState {
+  const base = createInitialState();
   const migratedHabits = (state.habits || []).map((h) =>
     h.id === 'habit-gym'
       ? {
@@ -339,12 +486,8 @@ function migrateStateIfNeeded(state: CompleteAppState): CompleteAppState {
       : h
   );
 
-  const existingStartMs = state.nofapState?.startTimestamp
-    ? new Date(state.nofapState.startTimestamp).getTime()
-    : Date.now();
-  const existingElapsedSec = Math.floor((Date.now() - existingStartMs) / 1000);
   const needsNofapUpgrade =
-    (state.schemaVersion || 0) < 4 || existingElapsedSec < 298 * 86400;
+    (state.schemaVersion || 0) < 4 && (state.nofapState?.totalResets || 0) === 0;
 
   const targetNofapStartIso = new Date(
     Date.now() - INITIAL_NOFAP_STREAK_SECONDS * 1000
@@ -352,28 +495,77 @@ function migrateStateIfNeeded(state: CompleteAppState): CompleteAppState {
 
   const migratedNofapState: NoFapState = needsNofapUpgrade
     ? {
-        ...(state.nofapState || createInitialState().nofapState),
+        ...(state.nofapState || base.nofapState),
         startTimestamp: targetNofapStartIso,
         longestStreakSeconds: Math.max(
           state.nofapState?.longestStreakSeconds || 0,
           INITIAL_NOFAP_STREAK_SECONDS
         ),
       }
-    : state.nofapState || createInitialState().nofapState;
+    : state.nofapState || base.nofapState;
+
+  const todayStr = getLjubljanaDateString();
 
   return {
-    ...createInitialState(),
+    ...base,
     ...state,
     nofapState: migratedNofapState,
-    habits: migratedHabits.length > 0 ? migratedHabits : createInitialState().habits,
+    habits: migratedHabits.length > 0 ? migratedHabits : base.habits,
     settings: {
       ...DEFAULT_USER_SETTINGS,
       ...(state.settings || {}),
+      themeMode: state.settings?.themeMode || 'dark',
+      timezone: state.settings?.timezone || 'Europe/Ljubljana',
+      dashboardSections:
+        state.settings?.dashboardSections && state.settings.dashboardSections.length > 0
+          ? state.settings.dashboardSections
+          : DEFAULT_DASHBOARD_SECTIONS,
+      disciplinePrivacy: {
+        ...DEFAULT_DISCIPLINE_PRIVACY,
+        ...(state.settings?.disciplinePrivacy || {}),
+      },
+      nutritionTargets: {
+        ...DEFAULT_NUTRITION_TARGETS,
+        ...(state.settings?.nutritionTargets || {}),
+      },
+      aiPrivacy: {
+        ...DEFAULT_AI_PRIVACY,
+        ...(state.settings?.aiPrivacy || {}),
+      },
+      reminderConfigs:
+        state.settings?.reminderConfigs && state.settings.reminderConfigs.length > 0
+          ? state.settings.reminderConfigs
+          : createDefaultReminderConfigs(
+              state.settings?.timezone || 'Europe/Ljubljana',
+              state.settings?.visionReminderAnchorDate || todayStr
+            ),
+      customReminders:
+        state.settings?.customReminders && state.settings.customReminders.length > 0
+          ? state.settings.customReminders
+          : REMINDER_MESSAGE_LIBRARY,
+      visionReminderTime: state.settings?.visionReminderTime || '19:00',
     },
     whyIStarted: {
       ...DEFAULT_WHY_I_STARTED,
       ...(state.whyIStarted || {}),
     },
+    gratitudeEntries: state.gratitudeEntries ?? base.gratitudeEntries,
+    prayerEntries: state.prayerEntries ?? base.prayerEntries,
+    bibleReadingProgress: state.bibleReadingProgress ?? {},
+    verseNotes: state.verseNotes ?? {},
+    dailyReflections: state.dailyReflections ?? {},
+    visionDraft: state.visionDraft ?? base.visionDraft,
+    visionVersions:
+      state.visionVersions && state.visionVersions.length > 0
+        ? state.visionVersions
+        : base.visionVersions,
+    biweeklyVisionReviews: state.biweeklyVisionReviews ?? [],
+    workoutLogs: state.workoutLogs ?? [],
+    dailyCheckIns: state.dailyCheckIns ?? {},
+    nutritionEntries: state.nutritionEntries ?? {},
+    nutritionImports: state.nutritionImports ?? [],
+    aiConversations: state.aiConversations ?? [],
+    inAppNotifications: state.inAppNotifications ?? [],
     schemaVersion: CURRENT_SCHEMA_VERSION,
   };
 }

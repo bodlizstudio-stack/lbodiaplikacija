@@ -1,0 +1,25 @@
+{
+  "name": "LBODI — Vera, Disciplina, Rast",
+  "short_name": "LBODI",
+  "description": "Osebna krščanska aplikacija za vero v Jezusa Kristusa, samodisciplino, hvaležnost, navade in telesno preobrazbo.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0B1220",
+  "background_color": "#0B1220",
+  "lang": "sl",
+  "icons": [
+    {
+      "src": "/logo.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64",
+      "type": "image/x-icon"
+    }
+  ]
+}

@@ -2,15 +2,20 @@ import {
   addDays,
   calculateCompletedDaysStreak,
   calculateDailyDisciplineScore,
+  calculateHabitStreak,
+  calculateNext14DayReminder,
   calculateNoFapStreak,
   computeWeeklyReviewStats,
   formatTransformationElapsed,
+  getDailyScriptureIndex,
   getWeekBounds,
   isHabitScheduledForDate,
   shouldSendMissedTaskNotification,
 } from '../src/utils/dateUtils';
 import { ensureTodayHabitRecords, CompleteAppState } from '../src/db/database';
 import { DEFAULT_USER_SETTINGS, DEFAULT_WHY_I_STARTED } from '../src/data/seedData';
+import { parseNutritionCsv, parseNutritionJson } from '../src/services/nutritionParser';
+import { buildAuthorizedAIContext } from '../src/services/aiPrivacyService';
 import { DailyHabitRecord, Habit } from '../src/types';
 
 // Mock AsyncStorage for database unit tests
@@ -300,6 +305,146 @@ describe('GET UP — Core Discipline Engine & Accountability Tests', () => {
       expect(
         formatTransformationElapsed('2026-08-17', '2026-11-09', 'en')
       ).toBe('Transformation — 12 weeks (84 days)');
+    });
+  });
+
+  describe('6. LBODI 2.0 — Faith, 14-Day Vision, Scheduled Habit Streaks, Nutrition & AI Privacy', () => {
+    it('returns deterministic Scripture index for a given date without shifting on reload', () => {
+      const idxA = getDailyScriptureIndex('2026-11-21', 31);
+      const idxB = getDailyScriptureIndex('2026-11-21', 31);
+      const nextDay = getDailyScriptureIndex('2026-11-22', 31);
+      expect(idxA).toBe(idxB);
+      expect(nextDay).not.toBe(idxA);
+    });
+
+    it('calculates exact 14-calendar-day intervals safely across DST transitions', () => {
+      // Anchor right before European spring-forward DST (2026-03-20 + 14d = 2026-04-03)
+      const res1 = calculateNext14DayReminder('2026-03-20', '2026-03-25');
+      expect(res1.nextDate).toBe('2026-04-03');
+      expect(res1.daysUntil).toBe(9);
+      expect(res1.isDueToday).toBe(false);
+
+      // Exact 14-day mark
+      const due = calculateNext14DayReminder('2026-03-20', '2026-04-03');
+      expect(due.isDueToday).toBe(true);
+      expect(due.daysUntil).toBe(0);
+      expect(due.cycleNumber).toBe(1);
+    });
+
+    it('computes per-habit streak without penalizing unscheduled days', () => {
+      const mwfHabit: Habit = {
+        ...sampleDailyHabit,
+        id: 'habit-mwf',
+        repeatType: 'weekdays',
+        repeatDays: [1, 3, 5], // Mon, Wed, Fri
+        createdAt: '2026-11-01T00:00:00.000Z',
+      };
+      // Mon 2026-11-09, Wed 2026-11-11, Fri 2026-11-13 completed; Tue & Thu intentionally omitted
+      const recs: DailyHabitRecord[] = ['2026-11-09', '2026-11-11', '2026-11-13'].map((d) => ({
+        id: `rec_${d}`,
+        date: d,
+        habitId: 'habit-mwf',
+        habitTitleSnapshot: 'MWF Gym',
+        habitCategorySnapshot: 'fitness',
+        habitPrioritySnapshot: 'high',
+        habitIconSnapshot: 'barbell',
+        habitColorSnapshot: '#C7A76C',
+        completed: true,
+      }));
+      const streak = calculateHabitStreak(mwfHabit, recs, '2026-11-13');
+      expect(streak.current).toBe(3);
+      expect(streak.longest).toBe(3);
+    });
+
+    it('parses CSV & JSON nutrition exports and flags duplicate existing dates', () => {
+      const existing = {
+        '2026-11-20': {
+          date: '2026-11-20',
+          calories: 2400,
+          proteinG: 170,
+          carbsG: 250,
+          fatG: 70,
+          source: 'manual' as const,
+          updatedAt: '',
+        },
+      };
+      const csv = 'date,calories,protein,carbs,fat\n2026-11-20,2500,180,260,75\n2026-11-21,2350,175,230,68';
+      const parsedCsv = parseNutritionCsv(csv, existing);
+      expect(parsedCsv.rows).toHaveLength(2);
+      const dupRow = parsedCsv.rows.find((r) => r.date === '2026-11-20');
+      const newRow = parsedCsv.rows.find((r) => r.date === '2026-11-21');
+      expect(dupRow?.isDuplicate).toBe(true);
+      expect(dupRow?.include).toBe(false);
+      expect(newRow?.isDuplicate).toBe(false);
+      expect(newRow?.calories).toBe(2350);
+
+      const json = JSON.stringify([{ date: '2026-11-19', kcal: 2200, protein: 165, carbs: 210, fat: 65 }]);
+      const parsedJson = parseNutritionJson(json, existing);
+      expect(parsedJson.rows).toHaveLength(1);
+      expect(parsedJson.rows[0].proteinG).toBe(165);
+    });
+
+    it('enforces AI privacy toggles and excludes sensitive private records by default', () => {
+      const stateWithPrivateData: CompleteAppState = {
+        schemaVersion: 5,
+        settings: { ...DEFAULT_USER_SETTINGS },
+        habits: [sampleDailyHabit],
+        dailyHabitRecords: [],
+        dailySummaries: {},
+        nofapState: {
+          startTimestamp: '2026-01-01T00:00:00.000Z',
+          longestStreakSeconds: 999999,
+          totalResets: 0,
+          emergencyReasons: [],
+        },
+        nofapHistory: [],
+        manifestations: [],
+        affirmations: [],
+        physiqueEntries: [],
+        favoriteVerseIds: [],
+        weeklyReviews: [],
+        whyIStarted: { ...DEFAULT_WHY_I_STARTED },
+        dailyJournals: {
+          '2026-11-21': {
+            date: '2026-11-21',
+            wentWell: 'Top secret reflection',
+            wentWrong: '',
+            doBetterTomorrow: '',
+            feelings: 'Private',
+            gratitude: 'Family',
+            moodRating: 5,
+            energyRating: 5,
+            updatedAt: '',
+          },
+        },
+        prayerEntries: [
+          {
+            id: 'p1',
+            title: 'Private prayer',
+            text: 'Lord guide me privately',
+            date: '2026-11-21',
+            category: 'guidance',
+            status: 'in_prayer',
+            createdAt: '',
+            updatedAt: '',
+          },
+        ],
+        focusSessions: [],
+        goals: [],
+        unlockedAchievements: {},
+      };
+
+      const defaultCtx = buildAuthorizedAIContext(stateWithPrivateData);
+      expect(defaultCtx.journalEntries).toBeUndefined();
+      expect(defaultCtx.prayerEntries).toBeUndefined();
+      expect(defaultCtx.disciplineTracker).toBeUndefined();
+
+      const explicitCtx = buildAuthorizedAIContext(stateWithPrivateData, {
+        allowJournal: true,
+        allowPrayers: true,
+      });
+      expect(explicitCtx.journalEntries).toHaveLength(1);
+      expect(explicitCtx.prayerEntries).toHaveLength(1);
     });
   });
 });

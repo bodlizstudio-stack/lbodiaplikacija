@@ -1,20 +1,40 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import {
+  AIConversation,
+  AIMessage,
+  AIPrivacySettings,
   Affirmation,
+  BiweeklyVisionReview,
+  DailyCheckIn,
   DailyHabitRecord,
   DailyJournalEntry,
+  DailyReflectionEntry,
   DailySummary,
+  DashboardSectionConfig,
+  DisciplinePrivacySettings,
   FocusSession,
   Goal,
+  GratitudeEntry,
   Habit,
+  IdealDayPlan,
+  InAppNotificationItem,
+  LifestyleVisionSections,
+  LifestyleVisionVersion,
   ManifestationEntry,
   ManifestationSessionType,
   NoFapHistoryEntry,
+  NutritionEntry,
+  NutritionImportRecord,
+  NutritionTargets,
   PastSelfEntry,
   PhysiqueEntry,
+  PrayerEntry,
+  PrayerStatus,
+  ReminderConfig,
   UserSettings,
   WeeklyReview,
   WhyIStartedData,
+  WorkoutLog,
 } from '../types';
 import {
   CompleteAppState,
@@ -119,6 +139,67 @@ interface AppContextValue {
     entry: Omit<PastSelfEntry, 'id' | 'createdAt'> & { id?: string }
   ) => Promise<void>;
   deletePastSelfEntry: (id: string) => Promise<void>;
+
+  // LBODI 2.0: Gratitude to God
+  saveGratitudeEntry: (
+    entry: Omit<GratitudeEntry, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
+  ) => Promise<void>;
+  deleteGratitudeEntry: (id: string) => Promise<void>;
+  toggleGratitudeFavorite: (id: string) => Promise<void>;
+
+  // LBODI 2.0: Prayer Journal & Reading Plans & Verse Notes & Daily Reflection
+  savePrayerEntry: (
+    entry: Omit<PrayerEntry, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
+  ) => Promise<void>;
+  updatePrayerStatus: (id: string, status: PrayerStatus, reflection?: string) => Promise<void>;
+  deletePrayerEntry: (id: string) => Promise<void>;
+  toggleBibleReadingDay: (planId: string, dayNumber: number) => Promise<void>;
+  saveVerseNote: (verseId: string, note: string) => Promise<void>;
+  saveDailyReflection: (date: string, question: string, answer: string) => Promise<void>;
+
+  // LBODI 2.0: Lifestyle Vision (14-Day System)
+  saveVisionDraft: (payload: {
+    sections: LifestyleVisionSections;
+    idealDay: IdealDayPlan;
+    visionStatement: string;
+  }) => Promise<void>;
+  publishVisionVersion: (payload: {
+    sections: LifestyleVisionSections;
+    idealDay: IdealDayPlan;
+    visionStatement: string;
+  }) => Promise<void>;
+  saveBiweeklyVisionReview: (
+    review: Omit<BiweeklyVisionReview, 'id' | 'createdAt'>
+  ) => Promise<void>;
+
+  // LBODI 2.0: Workouts, Wellness Check-Ins & Nutrition
+  saveWorkoutLog: (log: Omit<WorkoutLog, 'id' | 'createdAt'> & { id?: string }) => Promise<void>;
+  deleteWorkoutLog: (id: string) => Promise<void>;
+  saveDailyCheckIn: (checkIn: Omit<DailyCheckIn, 'updatedAt'>) => Promise<void>;
+  saveNutritionEntry: (entry: Omit<NutritionEntry, 'updatedAt'>) => Promise<void>;
+  importNutritionEntries: (
+    entries: Omit<NutritionEntry, 'updatedAt'>[],
+    importMeta: Omit<NutritionImportRecord, 'id' | 'importedAt'>
+  ) => Promise<{ importedCount: number; skippedDuplicates: number }>;
+  deleteNutritionEntry: (date: string) => Promise<void>;
+
+  // LBODI 2.0: AI Conversations & Privacy
+  createAIConversation: (title?: string) => Promise<string>;
+  appendAIMessages: (conversationId: string, messages: AIMessage[]) => Promise<void>;
+  deleteAIConversation: (conversationId: string) => Promise<void>;
+  clearAllAIConversations: () => Promise<void>;
+  updateAIPrivacy: (partial: Partial<AIPrivacySettings>) => Promise<void>;
+
+  // LBODI 2.0: Notifications & Dashboard Customization
+  updateReminderConfig: (id: string, partial: Partial<ReminderConfig>) => Promise<void>;
+  markNotificationRead: (id: string) => Promise<void>;
+  markAllNotificationsRead: () => Promise<void>;
+  pushInAppNotification: (item: Omit<InAppNotificationItem, 'id' | 'createdAt' | 'read'>) => Promise<void>;
+  addCustomReminderMessage: (textSl: string, textEn: string, scriptureRef?: string) => Promise<void>;
+  deleteCustomReminderMessage: (id: string) => Promise<void>;
+  updateDashboardSections: (sections: DashboardSectionConfig[]) => Promise<void>;
+  updateDisciplinePrivacy: (partial: Partial<DisciplinePrivacySettings>) => Promise<void>;
+  updateNutritionTargets: (partial: Partial<NutritionTargets>) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -230,11 +311,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  // Ensure the 298d 22h 36m 30s baseline is applied immediately even across hot-reloads
+  // Ensure the 298d 22h 36m 30s baseline applies only to legacy pre-v4 snapshots
   useEffect(() => {
     if (!state) return;
     const calc = calculateNoFapStreak(state.nofapState.startTimestamp);
-    if (calc.days < 298 && state.nofapState.totalResets === 0) {
+    if ((state.schemaVersion || 0) < 4 && calc.days < 298 && state.nofapState.totalResets === 0) {
       const targetIso = new Date(
         Date.now() - INITIAL_NOFAP_STREAK_SECONDS * 1000
       ).toISOString();
@@ -255,7 +336,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return next;
       });
     }
-  }, [state?.nofapState.startTimestamp, state?.nofapState.totalResets]);
+  }, [state?.schemaVersion, state?.nofapState.startTimestamp, state?.nofapState.totalResets]);
 
   const persistAndSet = useCallback(async (updater: (prev: CompleteAppState) => CompleteAppState) => {
     setState((prev) => {
@@ -1025,6 +1106,616 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [persistAndSet]
   );
 
+  // ---------- LBODI 2.0 CRUD Actions ----------
+  const saveGratitudeEntry = useCallback(
+    async (
+      entryInput: Omit<GratitudeEntry, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
+    ) => {
+      await persistAndSet((prev) => {
+        const list = prev.gratitudeEntries || [];
+        const nowIso = new Date().toISOString();
+        const exists = entryInput.id && list.some((g) => g.id === entryInput.id);
+        const nextList = exists
+          ? list.map((g) =>
+              g.id === entryInput.id ? { ...g, ...entryInput, id: g.id, updatedAt: nowIso } : g
+            )
+          : [
+              {
+                ...entryInput,
+                id: entryInput.id || `grat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                createdAt: nowIso,
+                updatedAt: nowIso,
+              },
+              ...list,
+            ];
+        return { ...prev, gratitudeEntries: nextList };
+      });
+    },
+    [persistAndSet]
+  );
+
+  const deleteGratitudeEntry = useCallback(
+    async (id: string) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        gratitudeEntries: (prev.gratitudeEntries || []).filter((g) => g.id !== id),
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const toggleGratitudeFavorite = useCallback(
+    async (id: string) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        gratitudeEntries: (prev.gratitudeEntries || []).map((g) =>
+          g.id === id ? { ...g, isFavorite: !g.isFavorite, updatedAt: new Date().toISOString() } : g
+        ),
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const savePrayerEntry = useCallback(
+    async (entryInput: Omit<PrayerEntry, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) => {
+      await persistAndSet((prev) => {
+        const list = prev.prayerEntries || [];
+        const nowIso = new Date().toISOString();
+        const exists = entryInput.id && list.some((p) => p.id === entryInput.id);
+        const nextList = exists
+          ? list.map((p) =>
+              p.id === entryInput.id ? { ...p, ...entryInput, id: p.id, updatedAt: nowIso } : p
+            )
+          : [
+              {
+                ...entryInput,
+                id: entryInput.id || `prayer_${Date.now()}`,
+                createdAt: nowIso,
+                updatedAt: nowIso,
+              },
+              ...list,
+            ];
+        return { ...prev, prayerEntries: nextList };
+      });
+    },
+    [persistAndSet]
+  );
+
+  const updatePrayerStatus = useCallback(
+    async (id: string, status: PrayerStatus, reflection?: string) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        prayerEntries: (prev.prayerEntries || []).map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                status,
+                reflection: reflection !== undefined ? reflection : p.reflection,
+                updatedAt: new Date().toISOString(),
+              }
+            : p
+        ),
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const deletePrayerEntry = useCallback(
+    async (id: string) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        prayerEntries: (prev.prayerEntries || []).filter((p) => p.id !== id),
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const toggleBibleReadingDay = useCallback(
+    async (planId: string, dayNumber: number) => {
+      await persistAndSet((prev) => {
+        const currentProgress = prev.bibleReadingProgress || {};
+        const existingDays = currentProgress[planId] || [];
+        const hasDay = existingDays.includes(dayNumber);
+        const updatedDays = hasDay
+          ? existingDays.filter((d) => d !== dayNumber)
+          : [...existingDays, dayNumber].sort((a, b) => a - b);
+        return {
+          ...prev,
+          bibleReadingProgress: {
+            ...currentProgress,
+            [planId]: updatedDays,
+          },
+        };
+      });
+    },
+    [persistAndSet]
+  );
+
+  const saveVerseNote = useCallback(
+    async (verseId: string, note: string) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        verseNotes: {
+          ...(prev.verseNotes || {}),
+          [verseId]: note,
+        },
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const saveDailyReflection = useCallback(
+    async (date: string, question: string, answer: string) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        dailyReflections: {
+          ...(prev.dailyReflections || {}),
+          [date]: {
+            date,
+            question,
+            answer,
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const saveVisionDraft = useCallback(
+    async (payload: {
+      sections: LifestyleVisionSections;
+      idealDay: IdealDayPlan;
+      visionStatement: string;
+    }) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        visionDraft: {
+          ...payload,
+          updatedAt: new Date().toISOString(),
+        },
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const publishVisionVersion = useCallback(
+    async (payload: {
+      sections: LifestyleVisionSections;
+      idealDay: IdealDayPlan;
+      visionStatement: string;
+    }) => {
+      await persistAndSet((prev) => {
+        const nowIso = new Date().toISOString();
+        const todayStr = getLjubljanaDateString(new Date(), prev.settings.timezone);
+        const versions = prev.visionVersions || [];
+        const maxNum = versions.reduce((m, v) => Math.max(m, v.versionNumber), 0);
+        const newVersion: LifestyleVisionVersion = {
+          id: `vision_v${maxNum + 1}_${Date.now()}`,
+          versionNumber: maxNum + 1,
+          sections: payload.sections,
+          idealDay: payload.idealDay,
+          visionStatement: payload.visionStatement,
+          isDraft: false,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        };
+        const anchorDate = prev.settings.visionReminderAnchorDate || todayStr;
+        const nextConfigs = (prev.settings.reminderConfigs || []).map((rc) =>
+          rc.type === 'biweekly_vision' && !rc.anchorDate
+            ? { ...rc, anchorDate, updatedAt: nowIso }
+            : rc
+        );
+        return {
+          ...prev,
+          visionDraft: { ...payload, updatedAt: nowIso },
+          visionVersions: [newVersion, ...versions],
+          settings: {
+            ...prev.settings,
+            visionReminderAnchorDate: anchorDate,
+            reminderConfigs: nextConfigs,
+          },
+        };
+      });
+    },
+    [persistAndSet]
+  );
+
+  const saveBiweeklyVisionReview = useCallback(
+    async (review: Omit<BiweeklyVisionReview, 'id' | 'createdAt'>) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        biweeklyVisionReviews: [
+          {
+            ...review,
+            id: `vrev_${Date.now()}`,
+            createdAt: new Date().toISOString(),
+          },
+          ...(prev.biweeklyVisionReviews || []),
+        ],
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const saveWorkoutLog = useCallback(
+    async (logInput: Omit<WorkoutLog, 'id' | 'createdAt'> & { id?: string }) => {
+      await persistAndSet((prev) => {
+        const list = prev.workoutLogs || [];
+        const exists = logInput.id && list.some((w) => w.id === logInput.id);
+        const nextList = exists
+          ? list.map((w) => (w.id === logInput.id ? { ...w, ...logInput, id: w.id } : w))
+          : [
+              {
+                ...logInput,
+                id: logInput.id || `wrk_${Date.now()}`,
+                createdAt: new Date().toISOString(),
+              },
+              ...list,
+            ];
+        return { ...prev, workoutLogs: nextList };
+      });
+    },
+    [persistAndSet]
+  );
+
+  const deleteWorkoutLog = useCallback(
+    async (id: string) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        workoutLogs: (prev.workoutLogs || []).filter((w) => w.id !== id),
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const saveDailyCheckIn = useCallback(
+    async (checkIn: Omit<DailyCheckIn, 'updatedAt'>) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        dailyCheckIns: {
+          ...(prev.dailyCheckIns || {}),
+          [checkIn.date]: {
+            ...checkIn,
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const saveNutritionEntry = useCallback(
+    async (entry: Omit<NutritionEntry, 'updatedAt'>) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        nutritionEntries: {
+          ...(prev.nutritionEntries || {}),
+          [entry.date]: {
+            ...entry,
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const importNutritionEntries = useCallback(
+    async (
+      entries: Omit<NutritionEntry, 'updatedAt'>[],
+      importMeta: Omit<NutritionImportRecord, 'id' | 'importedAt'>
+    ): Promise<{ importedCount: number; skippedDuplicates: number }> => {
+      let importedCount = 0;
+      let skippedDuplicates = 0;
+
+      await persistAndSet((prev) => {
+        const existingEntries = { ...(prev.nutritionEntries || {}) };
+        const existingImports = prev.nutritionImports || [];
+        const alreadyImportedFingerprint = existingImports.some(
+          (imp) => imp.fingerprint === importMeta.fingerprint
+        );
+        if (alreadyImportedFingerprint) {
+          skippedDuplicates = entries.length;
+          return prev;
+        }
+
+        const nowIso = new Date().toISOString();
+        const savedDates: string[] = [];
+
+        for (const item of entries) {
+          if (existingEntries[item.date]) {
+            skippedDuplicates++;
+            continue;
+          }
+          existingEntries[item.date] = {
+            ...item,
+            updatedAt: nowIso,
+          };
+          savedDates.push(item.date);
+          importedCount++;
+        }
+
+        const newRecord: NutritionImportRecord = {
+          ...importMeta,
+          id: `imp_${Date.now()}`,
+          importedDates: savedDates,
+          importedAt: nowIso,
+        };
+
+        return {
+          ...prev,
+          nutritionEntries: existingEntries,
+          nutritionImports: [newRecord, ...existingImports],
+        };
+      });
+
+      return { importedCount, skippedDuplicates };
+    },
+    [persistAndSet]
+  );
+
+  const deleteNutritionEntry = useCallback(
+    async (date: string) => {
+      await persistAndSet((prev) => {
+        const copy = { ...(prev.nutritionEntries || {}) };
+        delete copy[date];
+        return { ...prev, nutritionEntries: copy };
+      });
+    },
+    [persistAndSet]
+  );
+
+  const createAIConversation = useCallback(
+    async (title?: string): Promise<string> => {
+      const id = `ai_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const nowIso = new Date().toISOString();
+      await persistAndSet((prev) => ({
+        ...prev,
+        aiConversations: [
+          {
+            id,
+            title: title || 'Nov pogovor / New Chat',
+            messages: [],
+            createdAt: nowIso,
+            updatedAt: nowIso,
+          },
+          ...(prev.aiConversations || []),
+        ],
+      }));
+      return id;
+    },
+    [persistAndSet]
+  );
+
+  const appendAIMessages = useCallback(
+    async (conversationId: string, messages: AIMessage[]) => {
+      await persistAndSet((prev) => {
+        const nowIso = new Date().toISOString();
+        const list = prev.aiConversations || [];
+        const exists = list.some((c) => c.id === conversationId);
+        if (!exists) {
+          const firstUser = messages.find((m) => m.role === 'user');
+          const conv: AIConversation = {
+            id: conversationId,
+            title: firstUser ? firstUser.content.slice(0, 42) : 'LBODI AI',
+            messages,
+            createdAt: nowIso,
+            updatedAt: nowIso,
+          };
+          return { ...prev, aiConversations: [conv, ...list] };
+        }
+        return {
+          ...prev,
+          aiConversations: list.map((c) => {
+            if (c.id !== conversationId) return c;
+            const nextMsgs = [...c.messages, ...messages];
+            const firstUser = nextMsgs.find((m) => m.role === 'user');
+            return {
+              ...c,
+              title:
+                c.messages.length === 0 && firstUser
+                  ? firstUser.content.slice(0, 42)
+                  : c.title,
+              messages: nextMsgs,
+              updatedAt: nowIso,
+            };
+          }),
+        };
+      });
+    },
+    [persistAndSet]
+  );
+
+  const deleteAIConversation = useCallback(
+    async (conversationId: string) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        aiConversations: (prev.aiConversations || []).filter((c) => c.id !== conversationId),
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const clearAllAIConversations = useCallback(async () => {
+    await persistAndSet((prev) => ({ ...prev, aiConversations: [] }));
+  }, [persistAndSet]);
+
+  const updateAIPrivacy = useCallback(
+    async (partial: Partial<AIPrivacySettings>) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          aiPrivacy: {
+            ...(prev.settings.aiPrivacy || {
+              allowHabits: true,
+              allowGoals: true,
+              allowVision: true,
+              allowWorkouts: true,
+              allowNutrition: true,
+              allowSleep: true,
+              allowJournal: false,
+              allowPrayers: false,
+              allowDisciplineTracker: false,
+            }),
+            ...partial,
+          },
+        },
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const updateReminderConfig = useCallback(
+    async (id: string, partial: Partial<ReminderConfig>) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          reminderConfigs: (prev.settings.reminderConfigs || []).map((rc) =>
+            rc.id === id ? { ...rc, ...partial, updatedAt: new Date().toISOString() } : rc
+          ),
+        },
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const markNotificationRead = useCallback(
+    async (id: string) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        inAppNotifications: (prev.inAppNotifications || []).map((n) =>
+          n.id === id ? { ...n, read: true } : n
+        ),
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const markAllNotificationsRead = useCallback(async () => {
+    await persistAndSet((prev) => ({
+      ...prev,
+      inAppNotifications: (prev.inAppNotifications || []).map((n) => ({ ...n, read: true })),
+    }));
+  }, [persistAndSet]);
+
+  const pushInAppNotification = useCallback(
+    async (item: Omit<InAppNotificationItem, 'id' | 'createdAt' | 'read'>) => {
+      await persistAndSet((prev) => {
+        const list = prev.inAppNotifications || [];
+        const duplicate = list.some(
+          (n) => n.date === item.date && n.reminderType === item.reminderType
+        );
+        if (duplicate) return prev;
+        return {
+          ...prev,
+          inAppNotifications: [
+            {
+              ...item,
+              id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+              read: false,
+              createdAt: new Date().toISOString(),
+            },
+            ...list,
+          ].slice(0, 60),
+        };
+      });
+    },
+    [persistAndSet]
+  );
+
+  const addCustomReminderMessage = useCallback(
+    async (textSl: string, textEn: string, scriptureRef?: string) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          customReminders: [
+            {
+              id: `cmsg_${Date.now()}`,
+              textSl,
+              textEn,
+              scriptureRef,
+              active: true,
+            },
+            ...(prev.settings.customReminders || []),
+          ],
+        },
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const deleteCustomReminderMessage = useCallback(
+    async (id: string) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          customReminders: (prev.settings.customReminders || []).filter((m) => m.id !== id),
+        },
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const updateDashboardSections = useCallback(
+    async (sections: DashboardSectionConfig[]) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          dashboardSections: sections,
+        },
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const updateDisciplinePrivacy = useCallback(
+    async (partial: Partial<DisciplinePrivacySettings>) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          disciplinePrivacy: {
+            ...(prev.settings.disciplinePrivacy || {
+              hideFromDashboard: false,
+              customTitle: 'Disciplina in čistost',
+              personalGoalDays: 365,
+              personalReason: '',
+            }),
+            ...partial,
+          },
+        },
+      }));
+    },
+    [persistAndSet]
+  );
+
+  const updateNutritionTargets = useCallback(
+    async (partial: Partial<NutritionTargets>) => {
+      await persistAndSet((prev) => ({
+        ...prev,
+        settings: {
+          ...prev.settings,
+          nutritionTargets: {
+            ...(prev.settings.nutritionTargets || {
+              calories: 2500,
+              proteinG: 180,
+              carbsG: 260,
+              fatG: 75,
+            }),
+            ...partial,
+          },
+        },
+      }));
+    },
+    [persistAndSet]
+  );
+
   if (!isReady || !state) {
     return null;
   }
@@ -1071,6 +1762,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteGoal,
         savePastSelfEntry,
         deletePastSelfEntry,
+        saveGratitudeEntry,
+        deleteGratitudeEntry,
+        toggleGratitudeFavorite,
+        savePrayerEntry,
+        updatePrayerStatus,
+        deletePrayerEntry,
+        toggleBibleReadingDay,
+        saveVerseNote,
+        saveDailyReflection,
+        saveVisionDraft,
+        publishVisionVersion,
+        saveBiweeklyVisionReview,
+        saveWorkoutLog,
+        deleteWorkoutLog,
+        saveDailyCheckIn,
+        saveNutritionEntry,
+        importNutritionEntries,
+        deleteNutritionEntry,
+        createAIConversation,
+        appendAIMessages,
+        deleteAIConversation,
+        clearAllAIConversations,
+        updateAIPrivacy,
+        updateReminderConfig,
+        markNotificationRead,
+        markAllNotificationsRead,
+        pushInAppNotification,
+        addCustomReminderMessage,
+        deleteCustomReminderMessage,
+        updateDashboardSections,
+        updateDisciplinePrivacy,
+        updateNutritionTargets,
       }}
     >
       {children}

@@ -11,12 +11,15 @@ import {
 export const LJUBLJANA_TZ = 'Europe/Ljubljana';
 
 /**
- * Formats a Date object or ISO string into YYYY-MM-DD in Europe/Ljubljana timezone.
+ * Formats a Date object or ISO string into YYYY-MM-DD in the given IANA timezone (default Europe/Ljubljana).
  */
-export function getLjubljanaDateString(date: Date = new Date()): string {
+export function getLjubljanaDateString(
+  date: Date = new Date(),
+  timezone: string = LJUBLJANA_TZ
+): string {
   try {
     const formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: LJUBLJANA_TZ,
+      timeZone: timezone || LJUBLJANA_TZ,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -38,12 +41,15 @@ export function getLjubljanaDateString(date: Date = new Date()): string {
 }
 
 /**
- * Returns the hour (0-23) in Europe/Ljubljana timezone.
+ * Returns the hour (0-23) in the given IANA timezone (default Europe/Ljubljana).
  */
-export function getLjubljanaHour(date: Date = new Date()): number {
+export function getLjubljanaHour(
+  date: Date = new Date(),
+  timezone: string = LJUBLJANA_TZ
+): number {
   try {
     const formatter = new Intl.DateTimeFormat('en-GB', {
-      timeZone: LJUBLJANA_TZ,
+      timeZone: timezone || LJUBLJANA_TZ,
       hour: '2-digit',
       hour12: false,
     });
@@ -378,4 +384,157 @@ export function formatTransformationElapsed(
   return lang === 'sl'
     ? `Transformacija — ${weeks} tednov (${diffDays} dni)`
     : `Transformation — ${weeks} weeks (${diffDays} days)`;
+}
+
+/**
+ * Deterministic daily index for Scripture of the Day so it stays consistent
+ * across reloads throughout the same local calendar day.
+ */
+export function getDailyScriptureIndex(dateStr: string, totalVerses: number): number {
+  if (totalVerses <= 0) return 0;
+  const noonMs = parseDateStringUTCNoon(dateStr).getTime();
+  const dayNumber = Math.floor(noonMs / 86400000);
+  return ((dayNumber % totalVerses) + totalVerses) % totalVerses;
+}
+
+/**
+ * Deterministic daily index for rotating daily reflection questions.
+ */
+export function getDailyReflectionIndex(dateStr: string, totalQuestions: number): number {
+  if (totalQuestions <= 0) return 0;
+  const noonMs = parseDateStringUTCNoon(dateStr).getTime();
+  const dayNumber = Math.floor(noonMs / 86400000);
+  return (((dayNumber + 5) % totalQuestions) + totalQuestions) % totalQuestions;
+}
+
+/**
+ * Exact 14-calendar-day recurring lifestyle vision reminder anchored to `anchorDate`.
+ * Immune to DST shifts via UTC-noon calendar day arithmetic.
+ */
+export function calculateNext14DayReminder(
+  anchorDate: string,
+  todayDateStr: string
+): {
+  nextDate: string;
+  daysUntil: number;
+  isDueToday: boolean;
+  cycleNumber: number;
+} {
+  const safeAnchor = anchorDate && /^\d{4}-\d{2}-\d{2}$/.test(anchorDate) ? anchorDate : todayDateStr;
+  const anchorMs = parseDateStringUTCNoon(safeAnchor).getTime();
+  const todayMs = parseDateStringUTCNoon(todayDateStr).getTime();
+  const diffDays = Math.round((todayMs - anchorMs) / 86400000);
+
+  if (diffDays <= 0) {
+    const firstDue = addDays(safeAnchor, 14);
+    const daysUntil = Math.round(
+      (parseDateStringUTCNoon(firstDue).getTime() - todayMs) / 86400000
+    );
+    return {
+      nextDate: firstDue,
+      daysUntil,
+      isDueToday: false,
+      cycleNumber: 1,
+    };
+  }
+
+  const remainder = diffDays % 14;
+  if (remainder === 0) {
+    const cycleNumber = Math.floor(diffDays / 14);
+    return {
+      nextDate: todayDateStr,
+      daysUntil: 0,
+      isDueToday: true,
+      cycleNumber,
+    };
+  }
+
+  const daysUntil = 14 - remainder;
+  const cycleNumber = Math.floor(diffDays / 14) + 1;
+  return {
+    nextDate: addDays(todayDateStr, daysUntil),
+    daysUntil,
+    isDueToday: false,
+    cycleNumber,
+  };
+}
+
+/**
+ * Calculates per-habit current and longest streaks while strictly respecting
+ * scheduled days (unscheduled rest days do not break or artificially inflate the streak).
+ */
+export function calculateHabitStreak(
+  habit: Habit,
+  records: DailyHabitRecord[],
+  todayDateStr: string
+): { current: number; longest: number } {
+  const habitRecsByDate = new Map<string, boolean>();
+  for (const r of records) {
+    if (r.habitId === habit.id && r.completed) {
+      habitRecsByDate.set(r.date, true);
+    }
+  }
+
+  // Determine earliest scan boundary
+  const createdDate = habit.createdAt ? habit.createdAt.slice(0, 10) : addDays(todayDateStr, -365);
+  const startScan = createdDate < addDays(todayDateStr, -365) ? addDays(todayDateStr, -365) : createdDate;
+
+  let current = 0;
+  let longest = 0;
+  let running = 0;
+
+  let cursor = startScan;
+  while (cursor <= todayDateStr) {
+    const scheduled = isHabitScheduledForDate(habit, cursor);
+    const done = Boolean(habitRecsByDate.get(cursor));
+
+    if (scheduled) {
+      if (done) {
+        running += 1;
+        if (running > longest) longest = running;
+      } else if (cursor < todayDateStr) {
+        running = 0;
+      }
+    } else if (done) {
+      // Bonus completion on unscheduled day counts safely
+      running += 1;
+      if (running > longest) longest = running;
+    }
+
+    cursor = addDays(cursor, 1);
+  }
+
+  // Backward scan for current active streak ending today (or yesterday if today still open)
+  let backCursor = todayDateStr;
+  let backStreak = 0;
+  for (let i = 0; i < 366; i++) {
+    if (backCursor < createdDate) break;
+    const scheduled = isHabitScheduledForDate(habit, backCursor);
+    const done = Boolean(habitRecsByDate.get(backCursor));
+
+    if (done) {
+      backStreak += 1;
+    } else if (scheduled) {
+      if (backCursor === todayDateStr) {
+        // Today is still in progress; allow yesterday's streak to stand
+        backCursor = addDays(backCursor, -1);
+        continue;
+      }
+      break;
+    }
+    // Unscheduled day with no completion: step over without breaking streak
+    backCursor = addDays(backCursor, -1);
+  }
+  current = backStreak;
+  if (current > longest) longest = current;
+
+  return { current, longest };
+}
+
+/**
+ * Returns true during reflective evening/night hours (18:00–03:59) in the user's timezone.
+ */
+export function isEveningHour(timezone: string = LJUBLJANA_TZ, now: Date = new Date()): boolean {
+  const hr = getLjubljanaHour(now, timezone);
+  return hr >= 18 || hr < 4;
 }

@@ -1,6 +1,9 @@
 import React, { useMemo, useState } from 'react';
+import { useRouter } from 'expo-router';
 import { useApp } from '../../src/store/AppContext';
-import { PerformanceHQShell } from '../../src/components/PerformanceHQShell';
+import { LBODIShell } from '../../src/components/LBODIShell';
+import { HABIT_TEMPLATES, HabitTemplate } from '../../src/data/faithData';
+import { calculateHabitStreak } from '../../src/utils/dateUtils';
 import {
   Habit,
   HabitCategory,
@@ -15,12 +18,12 @@ const CATEGORIES: { value: HabitCategory; labelSl: string; labelEn: string; icon
   { value: 'mindset', labelSl: 'Misli', labelEn: 'Mindset', icon: 'auto_awesome' },
   { value: 'study', labelSl: 'Študij', labelEn: 'Study', icon: 'school' },
   { value: 'work', labelSl: 'Projekti', labelEn: 'Work', icon: 'terminal' },
-  { value: 'recovery', labelSl: 'Spanje', labelEn: 'Recovery', icon: 'bedtime' },
+  { value: 'recovery', labelSl: 'Spanec', labelEn: 'Recovery', icon: 'bedtime' },
   { value: 'discipline', labelSl: 'Disciplina', labelEn: 'Discipline', icon: 'shield' },
 ];
 
 const PRIORITIES: { value: HabitPriority; labelSl: string; labelEn: string }[] = [
-  { value: 'critical', labelSl: 'Kritična', labelEn: 'Critical' },
+  { value: 'critical', labelSl: 'Ključna', labelEn: 'Critical' },
   { value: 'high', labelSl: 'Visoka', labelEn: 'High' },
   { value: 'medium', labelSl: 'Srednja', labelEn: 'Medium' },
   { value: 'low', labelSl: 'Nizka', labelEn: 'Low' },
@@ -37,6 +40,7 @@ const WEEKDAYS = [
 ];
 
 export default function HabitsScreen() {
+  const router = useRouter();
   const {
     state,
     todayDateStr,
@@ -51,26 +55,11 @@ export default function HabitsScreen() {
   } = useApp();
 
   const lang = state.settings.language;
-  const [subTab, setSubTab] = useState<'today' | 'manage'>('today');
+  const [subTab, setSubTab] = useState<'today' | 'manage' | 'templates'>('today');
   const [restAlertMsg, setRestAlertMsg] = useState<string | null>(null);
   const gymRestUsedThisWeek = getGymRestDaysUsedThisWeek(todayDateStr);
 
-  const handleGymRestClick = async (e: React.MouseEvent, habitId: string) => {
-    e.stopPropagation();
-    const res = await toggleGymRestDay(todayDateStr, habitId);
-    if (!res.ok) {
-      setRestAlertMsg(
-        lang === 'sl'
-          ? 'Največ 2 dni počitka na teden sta že porabljena (2/2)! Danes ni izgovorov — pojdi na trening.'
-          : 'Maximum 2 rest days in one week already used (2/2)! No excuses today — get to the gym.'
-      );
-      setTimeout(() => setRestAlertMsg(null), 4500);
-    } else {
-      setRestAlertMsg(null);
-    }
-  };
-
-  // Form Modal State
+  // Modal editor
   const [modalVisible, setModalVisible] = useState(false);
   const [editingHabitId, setEditingHabitId] = useState<string | undefined>(undefined);
   const [title, setTitle] = useState('');
@@ -89,15 +78,8 @@ export default function HabitsScreen() {
     () => state.dailyHabitRecords.filter((r) => r.date === todayDateStr),
     [state.dailyHabitRecords, todayDateStr]
   );
-
-  const activeRecords = useMemo(
-    () => todayRecords.filter((r) => !r.completed),
-    [todayRecords]
-  );
-  const completedRecords = useMemo(
-    () => todayRecords.filter((r) => r.completed),
-    [todayRecords]
-  );
+  const activeRecords = todayRecords.filter((r) => !r.completed);
+  const completedRecords = todayRecords.filter((r) => r.completed);
 
   const todaySummary = state.dailySummaries[todayDateStr] || {
     date: todayDateStr,
@@ -107,6 +89,34 @@ export default function HabitsScreen() {
     disciplineScore: 0,
     notes: '',
     updatedAt: '',
+  };
+
+  // Real Habit Analytics (best performing & needing attention)
+  const habitAnalytics = useMemo(() => {
+    return state.habits
+      .filter((h) => !h.isArchived)
+      .map((h) => {
+        const recs = state.dailyHabitRecords.filter((r) => r.habitId === h.id);
+        const done = recs.filter((r) => r.completed).length;
+        const pct = recs.length > 0 ? Math.round((done / recs.length) * 100) : 0;
+        const streaks = calculateHabitStreak(h, state.dailyHabitRecords, todayDateStr);
+        return { habit: h, done, total: recs.length, pct, ...streaks };
+      });
+  }, [state.habits, state.dailyHabitRecords, todayDateStr]);
+
+  const handleGymRestClick = async (e: React.MouseEvent, habitId: string) => {
+    e.stopPropagation();
+    const res = await toggleGymRestDay(todayDateStr, habitId);
+    if (!res.ok) {
+      setRestAlertMsg(
+        lang === 'sl'
+          ? 'Največ 2 dni počitka na teden sta že porabljena (2/2).'
+          : 'Maximum 2 rest days in one week already used (2/2).'
+      );
+      setTimeout(() => setRestAlertMsg(null), 4500);
+    } else {
+      setRestAlertMsg(null);
+    }
   };
 
   const openNewHabitModal = () => {
@@ -141,9 +151,7 @@ export default function HabitsScreen() {
 
   const handleSaveHabit = async () => {
     if (!title.trim()) {
-      setFormError(
-        lang === 'sl' ? 'Vnesi naziv naloge.' : 'Please enter a habit title.'
-      );
+      setFormError(lang === 'sl' ? 'Vnesi naziv navade.' : 'Enter a habit name.');
       return;
     }
     await saveHabit({
@@ -153,7 +161,7 @@ export default function HabitsScreen() {
       category,
       icon: 'checkbox',
       priority,
-      color: '#F97316',
+      color: '#C7A76C',
       repeatType,
       repeatDays: repeatType === 'weekdays' ? repeatDays : [0, 1, 2, 3, 4, 5, 6],
       targetDate: repeatType === 'one_time' ? todayDateStr : undefined,
@@ -166,88 +174,95 @@ export default function HabitsScreen() {
     setModalVisible(false);
   };
 
-  const toggleWeekday = (d: number) => {
-    setRepeatDays((prev) =>
-      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]
-    );
+  const handleAddTemplate = async (tpl: HabitTemplate) => {
+    await saveHabit({
+      title: `${tpl.titleSl} / ${tpl.titleEn}`,
+      description: lang === 'sl' ? tpl.descriptionSl : tpl.descriptionEn,
+      category: tpl.category,
+      icon: 'checkbox',
+      priority: tpl.priority,
+      color: '#C7A76C',
+      repeatType: tpl.repeatType,
+      repeatDays: tpl.repeatDays,
+      targetValue: tpl.targetValue,
+      unit: tpl.unit,
+      isPaused: false,
+      isArchived: false,
+    });
+    setSubTab('today');
   };
 
   return (
-    <PerformanceHQShell>
-      {/* Top Telemetry Banner */}
-      <section className="rounded-xl bg-gradient-to-br from-surface-container-high via-surface-container to-surface-container-low p-space-md machined-border thermal-top-edge">
-        <div className="flex items-center justify-between mb-2">
+    <LBODIShell>
+      <section className="lbodi-card thermal-top-edge p-4 sm:p-5 space-y-3">
+        <div className="flex items-center justify-between gap-2">
           <div>
-            <span className="text-label-sm font-label-sm text-primary uppercase tracking-widest">
-              DAILY EXECUTION PROTOCOL
+            <span className="text-[11px] font-semibold uppercase tracking-widest text-[var(--accent-gold)]">
+              {lang === 'sl' ? 'Dnevne navade in ritem' : 'Daily Habits & Consistency'}
             </span>
-            <h2 className="text-headline-md font-headline-md text-white">
-              {tr('habitsTitle')}
-            </h2>
+            <h1 className="font-sacred text-3xl font-semibold text-[var(--text-main)]">
+              {lang === 'sl' ? 'Moje navade' : 'My Habits'}
+            </h1>
           </div>
-          <button
-            onClick={openNewHabitModal}
-            className="py-2 px-3 bg-gradient-to-r from-primary-container to-inverse-primary rounded-lg text-on-primary font-headline-sm text-label-md flex items-center gap-1 shadow-md active:scale-95 machined-border"
-          >
-            <span className="material-symbols-outlined text-base">add</span>
-            <span>{lang === 'sl' ? 'Nova' : 'New'}</span>
-          </button>
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => router.replace('/(tabs)/calendar' as any)}
+              className="px-2.5 py-2 rounded-xl bg-[var(--bg-lowest)] border border-[var(--border-subtle)] text-xs text-[var(--text-main)]"
+              title="Koledar navad"
+            >
+              <span className="material-symbols-outlined text-base text-[var(--accent-gold)]">
+                calendar_month
+              </span>
+            </button>
+            <button
+              onClick={openNewHabitModal}
+              className="px-3 py-2 rounded-xl lbodi-gold-btn text-xs flex items-center gap-1"
+            >
+              <span className="material-symbols-outlined text-base">add</span>
+              <span>{lang === 'sl' ? 'Nova' : 'New'}</span>
+            </button>
+          </div>
         </div>
 
-        {/* Sub-Tab Selector */}
-        <div className="grid grid-cols-2 gap-2 mt-3">
-          <button
-            onClick={() => setSubTab('today')}
-            className={`py-2 px-3 rounded-lg text-label-md font-label-md machined-border transition-colors ${
-              subTab === 'today'
-                ? 'bg-primary-container text-on-primary font-bold'
-                : 'bg-surface-container-lowest text-on-surface-variant'
-            }`}
-          >
-            {tr('todaysMission')} ({todaySummary.completedCount}/{todaySummary.scheduledCount})
-          </button>
-          <button
-            onClick={() => setSubTab('manage')}
-            className={`py-2 px-3 rounded-lg text-label-md font-label-md machined-border transition-colors ${
-              subTab === 'manage'
-                ? 'bg-primary-container text-on-primary font-bold'
-                : 'bg-surface-container-lowest text-on-surface-variant'
-            }`}
-          >
-            {tr('allHabitsManage')} ({state.habits.length})
-          </button>
+        <div className="grid grid-cols-3 gap-1.5">
+          {[
+            { id: 'today', label: `${lang === 'sl' ? 'Danes' : 'Today'} (${todaySummary.completedCount}/${todaySummary.scheduledCount})` },
+            { id: 'manage', label: `${lang === 'sl' ? 'Analitika' : 'Manage'} (${state.habits.length})` },
+            { id: 'templates', label: lang === 'sl' ? 'Predloge (12)' : 'Templates' },
+          ].map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setSubTab(t.id as any)}
+              className={`py-2 rounded-xl text-[11px] font-semibold border ${
+                subTab === t.id
+                  ? 'bg-[var(--accent-gold)] text-[#0B1220] border-transparent'
+                  : 'bg-[var(--bg-lowest)] text-[var(--text-muted)] border-[var(--border-subtle)]'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
       </section>
 
-      {subTab === 'today' ? (
+      {subTab === 'today' && (
         <>
-          {/* Weekly Gym Rest Day Status Banner */}
-          <section className="rounded-xl bg-surface-container-low p-space-md machined-border flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-lg bg-surface-container-lowest flex items-center justify-center text-secondary machined-border flex-shrink-0">
-                <span className="material-symbols-outlined text-lg">bedtime</span>
-              </div>
-              <div>
-                <span className="text-label-sm font-label-sm text-secondary uppercase tracking-wider block">
-                  {lang === 'sl'
-                    ? 'TEDENSKI FITNES POČITEK (MAX 2 NA TEDEN)'
-                    : 'WEEKLY GYM REST PROTOCOL (MAX 2 / WEEK)'}
-                </span>
-                <p className="text-body-sm font-body-sm text-white font-medium">
-                  {lang === 'sl'
-                    ? `Porabljeni dnevi počitka ta teden: ${gymRestUsedThisWeek} / 2`
-                    : `Rest days used this week: ${gymRestUsedThisWeek} / 2`}
-                </p>
-              </div>
+          {/* Weekly Gym Rest Status */}
+          <section className="lbodi-card p-3.5 flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-[var(--accent-olive)]">bedtime</span>
+              <span className="text-[var(--text-main)] font-medium">
+                {lang === 'sl'
+                  ? `Fitnes počitek ta teden: ${gymRestUsedThisWeek}/2 (največ 2)`
+                  : `Gym rest days this week: ${gymRestUsedThisWeek}/2`}
+              </span>
             </div>
-            <div className="flex items-center gap-1.5">
-              {[0, 1].map((slot) => (
+            <div className="flex gap-1">
+              {[0, 1].map((s) => (
                 <span
-                  key={slot}
-                  className={`w-3 h-3 rounded-full ${
-                    slot < gymRestUsedThisWeek
-                      ? 'bg-secondary shadow-[0_0_8px_#ffb95a]'
-                      : 'bg-surface-variant'
+                  key={s}
+                  className={`w-2.5 h-2.5 rounded-full ${
+                    s < gymRestUsedThisWeek ? 'bg-[var(--accent-olive)]' : 'bg-[var(--border-subtle)]'
                   }`}
                 />
               ))}
@@ -255,291 +270,171 @@ export default function HabitsScreen() {
           </section>
 
           {restAlertMsg && (
-            <section className="rounded-xl bg-error-container/40 border border-error p-3 text-error text-label-sm font-label-sm flex items-center gap-2 hq-page-fade">
-              <span className="material-symbols-outlined text-base">warning</span>
-              <span>{restAlertMsg}</span>
-            </section>
+            <div className="p-2.5 rounded-xl bg-red-900/25 border border-red-400/40 text-red-300 text-xs">
+              {restAlertMsg}
+            </div>
           )}
 
-          {/* Pending Priority Missions */}
-          <section className="rounded-xl bg-surface-container p-space-md machined-border">
-            <div className="flex justify-between items-center mb-space-sm">
-              <span className="text-label-sm font-label-sm uppercase tracking-wider text-primary">
+          {/* Pending */}
+          <section className="lbodi-card p-4 space-y-2.5">
+            <div className="flex justify-between items-center text-xs">
+              <span className="font-semibold uppercase tracking-wider text-[var(--accent-gold)]">
                 {tr('activeMission')}
               </span>
-              <span className="text-label-sm font-label-sm text-on-surface-variant">
-                {activeRecords.length} Remaining
-              </span>
+              <span className="text-[var(--text-muted)]">{activeRecords.length} odprtih</span>
             </div>
 
             {activeRecords.length === 0 ? (
-              <div className="p-4 rounded-lg bg-surface-container-low machined-border text-center">
-                <span className="material-symbols-outlined text-primary-container text-3xl">
-                  emoji_events
-                </span>
-                <p className="text-headline-sm font-headline-sm text-white mt-1">
-                  100% MISSION COMPLETE
-                </p>
-                <p className="text-body-sm font-body-sm text-on-surface-variant">
-                  Relentless execution today, Luka.
-                </p>
+              <div className="p-4 rounded-xl bg-[var(--bg-lowest)] text-center text-xs text-[var(--text-main)]">
+                Vse načrtovane navade za danes so opravljene. Hvala Bogu za zvesto vztrajnost.
               </div>
             ) : (
-              <div className="space-y-2.5">
-                {activeRecords.map((rec) => {
-                  const catObj = CATEGORIES.find(
-                    (c) => c.value === rec.habitCategorySnapshot
-                  );
-                  const isGymHabit =
-                    rec.habitId === 'habit-gym' ||
-                    rec.habitCategorySnapshot === 'fitness' ||
-                    rec.habitTitleSnapshot.toLowerCase().includes('gym') ||
-                    rec.habitTitleSnapshot.toLowerCase().includes('fitnes');
-
-                  return (
-                    <div
-                      key={rec.id}
-                      className="rounded-lg bg-surface-container-high machined-border border-l-2 border-l-primary-container transition-all duration-200"
-                    >
-                      <div
-                        onClick={() => toggleHabitCompletion(todayDateStr, rec.habitId)}
-                        className="flex items-center justify-between p-3 cursor-pointer hover:bg-surface-bright transition-colors"
-                      >
-                        <div className="flex items-center space-x-3">
-                          <div className="w-6 h-6 rounded bg-surface-variant border border-outline-variant flex items-center justify-center flex-shrink-0"></div>
-                          <div>
-                            <p className="text-body-md font-body-md text-white font-medium">
-                              {rec.habitTitleSnapshot}
-                            </p>
-                            <span className="text-label-sm font-label-sm text-on-surface-variant uppercase">
-                              {rec.habitCategorySnapshot} • {rec.habitPrioritySnapshot}{' '}
-                              {rec.targetValueSnapshot
-                                ? `• TARGET: ${rec.targetValueSnapshot} ${rec.unitSnapshot || ''}`
-                                : ''}
-                            </span>
-                          </div>
-                        </div>
-                        <span className="material-symbols-outlined text-primary text-sm">
-                          {catObj?.icon || 'bolt'}
-                        </span>
-                      </div>
-
-                      {isGymHabit && (
-                        <div className="px-3 pb-2.5 pt-1.5 border-t border-surface-variant/40 flex items-center justify-between bg-surface-container-lowest/50 rounded-b-lg">
-                          <span className="text-[10px] font-label-sm text-on-surface-variant uppercase">
-                            {lang === 'sl'
-                              ? `Počitek ta teden: ${gymRestUsedThisWeek}/2 (max 2)`
-                              : `Gym Rest Days: ${gymRestUsedThisWeek}/2 (Max 2)`}
-                          </span>
-                          <button
-                            onClick={(e) => handleGymRestClick(e, rec.habitId)}
-                            className={`px-2.5 py-1 rounded text-[10px] font-label-sm uppercase tracking-wider machined-border transition-all ${
-                              gymRestUsedThisWeek >= 2
-                                ? 'bg-surface-container text-tertiary opacity-60'
-                                : 'bg-surface-container-high text-secondary hover:bg-surface-bright'
-                            }`}
-                          >
-                            {gymRestUsedThisWeek >= 2
-                              ? lang === 'sl'
-                                ? '2/2 Počitka porabljena'
-                                : '2/2 Rests Used (Max)'
-                              : lang === 'sl'
-                              ? 'Danes sem imel počitek'
-                              : 'I had a rest today'}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          {/* Completed Missions Today */}
-          <section className="rounded-xl bg-surface-container p-space-md machined-border">
-            <div className="flex justify-between items-center mb-space-sm">
-              <span className="text-label-sm font-label-sm uppercase tracking-wider text-secondary">
-                {tr('completedMission')}
-              </span>
-              <span className="text-label-sm font-label-sm text-primary">
-                {completedRecords.length} Done
-              </span>
-            </div>
-
-            <div className="space-y-2.5">
-              {completedRecords.map((rec) => {
-                const catObj = CATEGORIES.find(
-                  (c) => c.value === rec.habitCategorySnapshot
-                );
-                const isRestDayToday = Boolean(
-                  rec.isRestDay || rec.notes === 'GYM_REST_DAY'
-                );
+              activeRecords.map((rec) => {
+                const isGymHabit =
+                  rec.habitId === 'habit-gym' ||
+                  rec.habitCategorySnapshot === 'fitness' ||
+                  rec.habitTitleSnapshot.toLowerCase().includes('gym') ||
+                  rec.habitTitleSnapshot.toLowerCase().includes('fitnes');
                 return (
                   <div
                     key={rec.id}
-                    onClick={() => toggleHabitCompletion(todayDateStr, rec.habitId)}
-                    className="flex items-center justify-between p-3 rounded-lg bg-surface-container-low machined-border cursor-pointer transition-opacity hover:opacity-90"
+                    className="rounded-xl bg-[var(--bg-lowest)] border border-[var(--border-subtle)] overflow-hidden"
                   >
-                    <div className="flex items-center space-x-3">
-                      <div
-                        className={`w-6 h-6 rounded flex items-center justify-center shadow-sm flex-shrink-0 ${
-                          isRestDayToday
-                            ? 'bg-secondary-container text-white'
-                            : 'bg-primary-container text-on-primary-container'
-                        }`}
-                      >
-                        <span className="material-symbols-outlined text-sm font-bold">
-                          {isRestDayToday ? 'bedtime' : 'check'}
-                        </span>
-                      </div>
-                      <div>
-                        <p className="text-body-md font-body-md text-on-surface line-through opacity-75">
-                          {rec.habitTitleSnapshot}
-                        </p>
-                        <span
-                          className={`text-label-sm font-label-sm tracking-wide uppercase ${
-                            isRestDayToday ? 'text-secondary' : 'text-primary'
-                          }`}
-                        >
-                          {isRestDayToday
-                            ? `REST DAY LOGGED • ${gymRestUsedThisWeek}/2 USED THIS WEEK`
-                            : `${rec.habitCategorySnapshot} • COMPLETED`}
-                        </span>
+                    <div
+                      onClick={() => toggleHabitCompletion(todayDateStr, rec.habitId)}
+                      className="flex items-center justify-between p-3 cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-6 h-6 rounded-lg border border-[var(--border-gold)] flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[var(--text-main)] truncate">
+                            {rec.habitTitleSnapshot}
+                          </p>
+                          <span className="text-[10px] uppercase text-[var(--text-muted)]">
+                            {rec.habitCategorySnapshot}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                    <span className="material-symbols-outlined text-on-surface-variant text-sm">
-                      {catObj?.icon || 'check_circle'}
-                    </span>
+                    {isGymHabit && (
+                      <div className="px-3 py-2 border-t border-[var(--border-subtle)] flex justify-between items-center text-[11px]">
+                        <span className="text-[var(--text-muted)]">
+                          Počitek: {gymRestUsedThisWeek}/2
+                        </span>
+                        <button
+                          onClick={(e) => handleGymRestClick(e, rec.habitId)}
+                          className="px-2.5 py-1 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--accent-gold)]"
+                        >
+                          Danes sem imel počitek
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
-              })}
-            </div>
+              })
+            )}
           </section>
 
-          {/* End-of-Day Summary & Field Notes */}
-          <section className="rounded-xl bg-surface-container-low p-space-md machined-border thermal-top-edge">
-            <h3 className="text-headline-sm font-headline-sm text-white mb-2">
-              {tr('dailyNotesTitle')}
-            </h3>
-            <div className="grid grid-cols-3 gap-2 mb-3 text-center">
-              <div className="bg-surface-container p-2 rounded-lg machined-border">
-                <span className="text-headline-sm font-headline-sm text-white block">
-                  {todaySummary.completedCount}
-                </span>
-                <span className="text-label-sm font-label-sm text-tertiary uppercase">
-                  Done
-                </span>
-              </div>
-              <div className="bg-surface-container p-2 rounded-lg machined-border">
-                <span className="text-headline-sm font-headline-sm text-error block">
-                  {Math.max(0, todaySummary.scheduledCount - todaySummary.completedCount)}
-                </span>
-                <span className="text-label-sm font-label-sm text-tertiary uppercase">
-                  Missed
-                </span>
-              </div>
-              <div className="bg-surface-container p-2 rounded-lg machined-border">
-                <span className="text-headline-sm font-headline-sm text-primary-container block">
-                  {todaySummary.disciplineScore}%
-                </span>
-                <span className="text-label-sm font-label-sm text-tertiary uppercase">
-                  Score
-                </span>
-              </div>
+          {/* Completed */}
+          <section className="lbodi-card p-4 space-y-2.5">
+            <div className="flex justify-between items-center text-xs">
+              <span className="font-semibold uppercase tracking-wider text-[var(--accent-olive)]">
+                {tr('completedMission')}
+              </span>
+              <span className="text-[var(--text-muted)]">{completedRecords.length}</span>
             </div>
-
-            <textarea
-              value={todaySummary.notes}
-              onChange={(e) => updateDailySummaryNotes(todayDateStr, e.target.value)}
-              placeholder={tr('dailyNotesPlaceholder')}
-              rows={3}
-              className="w-full rounded-lg bg-surface-container-lowest border border-outline-variant text-on-surface p-3 text-body-sm focus:border-primary-container focus:ring-0"
-            />
-          </section>
-        </>
-      ) : (
-        /* Manage All Habits View */
-        <section className="space-y-3">
-          {state.habits.map((h) => (
-            <div
-              key={h.id}
-              className="rounded-xl bg-surface-container p-space-md machined-border"
-            >
-              <div className="flex justify-between items-start gap-2">
-                <div>
-                  <h4 className="text-body-md font-body-md text-white font-semibold">
-                    {h.title}
-                  </h4>
-                  {h.description && (
-                    <p className="text-body-sm font-body-sm text-on-surface-variant mt-0.5">
-                      {h.description}
+            {completedRecords.map((rec) => {
+              const isRest = Boolean(rec.isRestDay || rec.notes === 'GYM_REST_DAY');
+              return (
+                <div
+                  key={rec.id}
+                  onClick={() => toggleHabitCompletion(todayDateStr, rec.habitId)}
+                  className="p-3 rounded-xl bg-[var(--bg-lowest)] border border-[var(--border-subtle)] flex items-center gap-3 cursor-pointer"
+                >
+                  <div
+                    className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                      isRest ? 'bg-[var(--accent-olive)] text-white' : 'bg-[var(--accent-gold)] text-[#0B1220]'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-sm font-bold">
+                      {isRest ? 'bedtime' : 'check'}
+                    </span>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm line-through text-[var(--text-muted)] truncate">
+                      {rec.habitTitleSnapshot}
                     </p>
-                  )}
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    <span className="text-label-sm font-label-sm px-2 py-0.5 rounded bg-surface-container-highest text-primary uppercase">
-                      {h.category}
-                    </span>
-                    <span className="text-label-sm font-label-sm px-2 py-0.5 rounded bg-surface-container-lowest text-secondary uppercase">
-                      {h.priority}
-                    </span>
-                    <span className="text-label-sm font-label-sm px-2 py-0.5 rounded bg-surface-container-lowest text-tertiary uppercase">
-                      {h.repeatType}
-                    </span>
-                    {h.reminderTime && (
-                      <span className="text-label-sm font-label-sm px-2 py-0.5 rounded bg-surface-container-lowest text-on-surface-variant">
-                        ⏰ {h.reminderTime}
+                    {isRest && (
+                      <span className="text-[10px] text-[var(--accent-olive)]">
+                        Počitek zabeležen (klikni za preklic)
                       </span>
                     )}
                   </div>
                 </div>
+              );
+            })}
+          </section>
 
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => openEditHabitModal(h)}
-                    className="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center text-primary hover:text-white machined-border"
-                  >
+          {/* Daily Notes */}
+          <section className="lbodi-card p-4 space-y-2">
+            <label className="text-xs font-semibold text-[var(--text-main)] block">
+              {tr('dailyNotesTitle')}
+            </label>
+            <textarea
+              value={todaySummary.notes}
+              onChange={(e) => updateDailySummaryNotes(todayDateStr, e.target.value)}
+              placeholder={tr('dailyNotesPlaceholder')}
+              rows={2}
+              className="w-full rounded-xl bg-[var(--bg-lowest)] border border-[var(--border-subtle)] p-2.5 text-xs text-[var(--text-main)]"
+            />
+          </section>
+        </>
+      )}
+
+      {subTab === 'manage' && (
+        <section className="space-y-2.5">
+          {habitAnalytics.map(({ habit: h, pct, current, longest }) => (
+            <div key={h.id} className="lbodi-card p-4 space-y-2">
+              <div className="flex justify-between items-start gap-2">
+                <div className="min-w-0">
+                  <h4 className="text-sm font-semibold text-[var(--text-main)] truncate">
+                    {h.title}
+                  </h4>
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    Niz: {current} dni (najdaljši {longest}) • Konsistenca: {pct}%
+                  </p>
+                </div>
+                <div className="flex gap-1.5 flex-shrink-0">
+                  <button onClick={() => openEditHabitModal(h)} className="text-[var(--accent-gold)]">
                     <span className="material-symbols-outlined text-base">edit</span>
                   </button>
-                  <button
-                    onClick={() => togglePauseHabit(h.id)}
-                    className="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center text-secondary hover:text-white machined-border"
-                  >
+                  <button onClick={() => togglePauseHabit(h.id)} className="text-[var(--accent-olive)]">
                     <span className="material-symbols-outlined text-base">
                       {h.isPaused ? 'play_arrow' : 'pause'}
                     </span>
                   </button>
-                  <button
-                    onClick={() => setConfirmDeleteId(h.id)}
-                    className="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center text-error hover:text-white machined-border"
-                  >
+                  <button onClick={() => setConfirmDeleteId(h.id)} className="text-red-400">
                     <span className="material-symbols-outlined text-base">delete</span>
                   </button>
                 </div>
               </div>
-
               {confirmDeleteId === h.id && (
-                <div className="mt-3 pt-2 border-t border-surface-variant flex items-center justify-between">
-                  <span className="text-label-sm font-label-sm text-error">
-                    Delete habit? Past history stays safe.
-                  </span>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={async () => {
-                        await deleteHabit(h.id);
-                        setConfirmDeleteId(null);
-                      }}
-                      className="px-2.5 py-1 rounded bg-error-container text-on-error-container text-label-sm font-bold"
-                    >
-                      {tr('delete')}
-                    </button>
-                    <button
-                      onClick={() => setConfirmDeleteId(null)}
-                      className="px-2.5 py-1 rounded bg-surface-variant text-tertiary text-label-sm"
-                    >
-                      {tr('cancel')}
-                    </button>
-                  </div>
+                <div className="flex justify-end gap-2 pt-2 border-t border-[var(--border-subtle)]">
+                  <button
+                    onClick={async () => {
+                      await deleteHabit(h.id);
+                      setConfirmDeleteId(null);
+                    }}
+                    className="px-3 py-1 rounded-lg bg-red-600 text-white text-xs font-semibold"
+                  >
+                    Izbriši
+                  </button>
+                  <button
+                    onClick={() => setConfirmDeleteId(null)}
+                    className="px-3 py-1 rounded-lg bg-[var(--bg-lowest)] text-xs text-[var(--text-muted)]"
+                  >
+                    Prekliči
+                  </button>
                 </div>
               )}
             </div>
@@ -547,125 +442,118 @@ export default function HabitsScreen() {
         </section>
       )}
 
-      {/* Habit Editor Overlay Modal */}
+      {subTab === 'templates' && (
+        <section className="space-y-2">
+          <p className="text-xs text-[var(--text-muted)] px-1">
+            Neobvezni predlogi krščanskih in življenjskih navad — z enim dotikom jih dodaš med svoje navade:
+          </p>
+          {HABIT_TEMPLATES.map((tpl) => (
+            <div key={tpl.id} className="lbodi-card p-3.5 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <h4 className="text-sm font-semibold text-[var(--text-main)]">
+                  {lang === 'sl' ? tpl.titleSl : tpl.titleEn}
+                </h4>
+                <p className="text-xs text-[var(--text-muted)]">
+                  {lang === 'sl' ? tpl.descriptionSl : tpl.descriptionEn}
+                </p>
+              </div>
+              <button
+                onClick={() => handleAddTemplate(tpl)}
+                className="px-3 py-1.5 rounded-xl lbodi-gold-btn text-xs flex-shrink-0"
+              >
+                + Dodaj
+              </button>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {/* Habit Editor Modal */}
       {modalVisible && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-xl bg-surface-container p-space-md machined-border thermal-top-edge max-h-[90vh] overflow-y-auto space-y-3">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md lbodi-card p-5 space-y-3 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center">
-              <h3 className="text-headline-sm font-headline-sm text-white">
+              <h3 className="text-base font-semibold text-[var(--text-main)]">
                 {editingHabitId ? tr('edit') : tr('newHabitBtn')}
               </h3>
-              <button
-                onClick={() => setModalVisible(false)}
-                className="text-tertiary hover:text-white"
-              >
+              <button onClick={() => setModalVisible(false)}>
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
-
-            {formError && (
-              <p className="text-label-sm font-label-sm text-error">{formError}</p>
-            )}
-
-            <div>
-              <label className="text-label-sm font-label-sm text-primary uppercase block mb-1">
-                {tr('habitTitleLabel')}
-              </label>
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Morning Gym & Heavy Lifting"
-                className="w-full rounded-lg bg-surface-container-lowest border border-outline-variant text-white p-2.5 text-body-sm"
-              />
+            {formError && <p className="text-xs text-red-400">{formError}</p>}
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder={tr('habitTitleLabel')}
+              className="w-full rounded-xl bg-[var(--bg-lowest)] border border-[var(--border-subtle)] p-2.5 text-xs text-[var(--text-main)]"
+            />
+            <input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={tr('habitDescLabel')}
+              className="w-full rounded-xl bg-[var(--bg-lowest)] border border-[var(--border-subtle)] p-2.5 text-xs text-[var(--text-main)]"
+            />
+            <div className="grid grid-cols-4 gap-1.5">
+              {CATEGORIES.map((c) => (
+                <button
+                  key={c.value}
+                  onClick={() => setCategory(c.value)}
+                  className={`p-1.5 rounded-lg text-[11px] border ${
+                    category === c.value
+                      ? 'bg-[var(--accent-gold)] text-[#0B1220] border-transparent font-semibold'
+                      : 'bg-[var(--bg-lowest)] text-[var(--text-muted)] border-[var(--border-subtle)]'
+                  }`}
+                >
+                  {lang === 'sl' ? c.labelSl : c.labelEn}
+                </button>
+              ))}
             </div>
-
-            <div>
-              <label className="text-label-sm font-label-sm text-primary uppercase block mb-1">
-                {tr('habitDescLabel')}
-              </label>
-              <input
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="No excuses..."
-                className="w-full rounded-lg bg-surface-container-lowest border border-outline-variant text-white p-2.5 text-body-sm"
-              />
+            <div className="grid grid-cols-4 gap-1.5">
+              {PRIORITIES.map((p) => (
+                <button
+                  key={p.value}
+                  onClick={() => setPriority(p.value)}
+                  className={`p-1.5 rounded-lg text-[11px] border ${
+                    priority === p.value
+                      ? 'bg-[var(--accent-gold)] text-[#0B1220] border-transparent font-semibold'
+                      : 'bg-[var(--bg-lowest)] text-[var(--text-muted)] border-[var(--border-subtle)]'
+                  }`}
+                >
+                  {lang === 'sl' ? p.labelSl : p.labelEn}
+                </button>
+              ))}
             </div>
-
-            <div>
-              <label className="text-label-sm font-label-sm text-primary uppercase block mb-1">
-                {tr('habitCategoryLabel')}
-              </label>
-              <div className="grid grid-cols-4 gap-1.5">
-                {CATEGORIES.map((c) => (
-                  <button
-                    key={c.value}
-                    onClick={() => setCategory(c.value)}
-                    className={`p-2 rounded text-label-sm font-label-sm machined-border ${
-                      category === c.value
-                        ? 'bg-primary-container text-on-primary font-bold'
-                        : 'bg-surface-container-lowest text-on-surface-variant'
-                    }`}
-                  >
-                    {lang === 'sl' ? c.labelSl : c.labelEn}
-                  </button>
-                ))}
-              </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {(['daily', 'weekdays', 'one_time'] as const).map((rt) => (
+                <button
+                  key={rt}
+                  onClick={() => setRepeatType(rt)}
+                  className={`p-1.5 rounded-lg text-[11px] border ${
+                    repeatType === rt
+                      ? 'bg-[var(--accent-gold)] text-[#0B1220] border-transparent font-semibold'
+                      : 'bg-[var(--bg-lowest)] text-[var(--text-muted)] border-[var(--border-subtle)]'
+                  }`}
+                >
+                  {rt === 'daily' ? 'Vsak dan' : rt === 'weekdays' ? 'Dnevi' : 'Danes'}
+                </button>
+              ))}
             </div>
-
-            <div>
-              <label className="text-label-sm font-label-sm text-primary uppercase block mb-1">
-                {tr('habitPriorityLabel')}
-              </label>
-              <div className="grid grid-cols-4 gap-1.5">
-                {PRIORITIES.map((p) => (
-                  <button
-                    key={p.value}
-                    onClick={() => setPriority(p.value)}
-                    className={`p-2 rounded text-label-sm font-label-sm machined-border ${
-                      priority === p.value
-                        ? 'bg-primary-container text-on-primary font-bold'
-                        : 'bg-surface-container-lowest text-on-surface-variant'
-                    }`}
-                  >
-                    {lang === 'sl' ? p.labelSl : p.labelEn}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="text-label-sm font-label-sm text-primary uppercase block mb-1">
-                {tr('habitRepeatLabel')}
-              </label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {(['daily', 'weekdays', 'one_time'] as const).map((rt) => (
-                  <button
-                    key={rt}
-                    onClick={() => setRepeatType(rt)}
-                    className={`p-2 rounded text-label-sm font-label-sm machined-border ${
-                      repeatType === rt
-                        ? 'bg-primary-container text-on-primary font-bold'
-                        : 'bg-surface-container-lowest text-on-surface-variant'
-                    }`}
-                  >
-                    {rt.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {repeatType === 'weekdays' && (
               <div className="grid grid-cols-7 gap-1">
                 {WEEKDAYS.map((w) => {
-                  const selected = repeatDays.includes(w.day);
+                  const sel = repeatDays.includes(w.day);
                   return (
                     <button
                       key={w.day}
-                      onClick={() => toggleWeekday(w.day)}
-                      className={`py-2 rounded text-label-sm font-label-sm machined-border ${
-                        selected
-                          ? 'bg-primary-container text-on-primary font-bold'
-                          : 'bg-surface-container-lowest text-tertiary'
+                      onClick={() =>
+                        setRepeatDays((prev) =>
+                          prev.includes(w.day) ? prev.filter((x) => x !== w.day) : [...prev, w.day]
+                        )
+                      }
+                      className={`py-1.5 rounded-lg text-[11px] border ${
+                        sel
+                          ? 'bg-[var(--accent-gold)] text-[#0B1220] font-semibold border-transparent'
+                          : 'bg-[var(--bg-lowest)] text-[var(--text-muted)] border-[var(--border-subtle)]'
                       }`}
                     >
                       {lang === 'sl' ? w.sl : w.en}
@@ -674,49 +562,12 @@ export default function HabitsScreen() {
                 })}
               </div>
             )}
-
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-label-sm font-label-sm text-primary uppercase block mb-1">
-                  Reminder (HH:MM)
-                </label>
-                <input
-                  value={reminderTime}
-                  onChange={(e) => setReminderTime(e.target.value)}
-                  placeholder="07:30"
-                  className="w-full rounded-lg bg-surface-container-lowest border border-outline-variant text-white p-2 text-body-sm"
-                />
-              </div>
-              <div>
-                <label className="text-label-sm font-label-sm text-primary uppercase block mb-1">
-                  Target Value
-                </label>
-                <input
-                  value={targetValue}
-                  onChange={(e) => setTargetValue(e.target.value)}
-                  placeholder="10000"
-                  className="w-full rounded-lg bg-surface-container-lowest border border-outline-variant text-white p-2 text-body-sm"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-3 border-t border-surface-variant">
-              <button
-                onClick={() => setModalVisible(false)}
-                className="px-4 py-2 rounded-lg bg-surface-container-low text-tertiary text-label-md machined-border"
-              >
-                {tr('cancel')}
-              </button>
-              <button
-                onClick={handleSaveHabit}
-                className="px-5 py-2 rounded-lg bg-gradient-to-r from-primary-container to-inverse-primary text-on-primary font-bold text-label-md machined-border"
-              >
-                {tr('save')}
-              </button>
-            </div>
+            <button onClick={handleSaveHabit} className="w-full py-2.5 rounded-xl lbodi-gold-btn text-xs">
+              {tr('save')}
+            </button>
           </div>
         </div>
       )}
-    </PerformanceHQShell>
+    </LBODIShell>
   );
 }

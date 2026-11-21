@@ -171,6 +171,21 @@ export const TRANSLATIONS = {
     pinLockLabel: 'PIN in biometrična zaščita aplikacije',
     exportDataBtn: 'Izvozi vse podatke in varnostno kopijo (JSON)',
     importDataBtn: 'Uvozi varnostno kopijo',
+
+    // LBODI 2.0
+    tabFaith: 'Vera',
+    faithTitle: 'Moja pot z Bogom',
+    faithSubtitle: 'Vsak dan bližje Jezusu Kristusu.',
+    gratitudeTitle: 'Hvaležnost Gospodu',
+    gratitudeSubtitle: 'Vsak dan prepoznaj blagoslove, ki ti jih daje Bog.',
+    visionTitle: 'Moje prihodnje življenje',
+    visionSubtitle: 'Vizija življenja s Kristusom v središču.',
+    disciplineTitle: 'Disciplina in čistost',
+    iNeedStrength: 'Potrebujem moč',
+    transformationTitle: 'Moja preobrazba',
+    nutritionTitle: 'Prehrana in Cal AI',
+    aiAssistantTitle: 'LBODI AI',
+    notificationsTitle: 'Obvestila in opomniki',
   },
   en: {
     appName: 'GET UP',
@@ -330,6 +345,21 @@ export const TRANSLATIONS = {
     pinLockLabel: 'PIN & Biometric App Lock',
     exportDataBtn: 'Export All Data & Backup (JSON)',
     importDataBtn: 'Import Backup Data',
+
+    // LBODI 2.0
+    tabFaith: 'Faith',
+    faithTitle: 'Walk With Christ',
+    faithSubtitle: 'Growing closer to Jesus Christ every day.',
+    gratitudeTitle: 'Gratitude to God',
+    gratitudeSubtitle: 'Recognize the blessings God gives you each day.',
+    visionTitle: 'My God-Centered Vision',
+    visionSubtitle: 'The life you are faithfully building.',
+    disciplineTitle: 'Purity & Self-Control',
+    iNeedStrength: 'I Need Strength',
+    transformationTitle: 'My Transformation',
+    nutritionTitle: 'Nutrition & Cal AI',
+    aiAssistantTitle: 'LBODI AI',
+    notificationsTitle: 'Notifications & Reminders',
   },
 } as const;
 

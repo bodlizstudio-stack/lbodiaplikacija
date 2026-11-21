@@ -43,10 +43,13 @@ function parseTimeHHMM(hhmm: string, fallbackHour: number, fallbackMin: number =
   return { hour: fallbackHour, minute: fallbackMin };
 }
 
-export async function requestNotificationPermissions(): Promise<boolean> {
+export async function requestNotificationPermissions(
+  promptUser: boolean = true
+): Promise<boolean> {
   if (Platform.OS === 'web') {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       if (window.Notification.permission === 'granted') return true;
+      if (!promptUser || window.Notification.permission === 'denied') return false;
       const res = await window.Notification.requestPermission();
       return res === 'granted';
     }
@@ -58,6 +61,7 @@ export async function requestNotificationPermissions(): Promise<boolean> {
     if (existing.granted || existing.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
       return true;
     }
+    if (!promptUser) return false;
     const requested = await Notifications.requestPermissionsAsync();
     return Boolean(requested.granted);
   } catch {
@@ -68,11 +72,13 @@ export async function requestNotificationPermissions(): Promise<boolean> {
 /**
  * Synchronizes all recurring and conditional notifications with the OS scheduler.
  * Prevents duplicates by clearing previous scheduled notifications first.
+ * Never prompts browser permission automatically unless `promptForPermission === true`.
  */
 export async function syncAllNotifications(
   settings: UserSettings,
   summariesByDate: Record<string, DailySummary>,
-  onMissedTaskNotified?: (notifiedYesterdayDate: string) => void
+  onMissedTaskNotified?: (notifiedYesterdayDate: string) => void,
+  promptForPermission: boolean = false
 ): Promise<{ scheduledCount: number; permissionsGranted: boolean }> {
   if (!settings.notificationsEnabled) {
     if (Platform.OS !== 'web') {
@@ -83,7 +89,7 @@ export async function syncAllNotifications(
     return { scheduledCount: 0, permissionsGranted: false };
   }
 
-  const granted = await requestNotificationPermissions();
+  const granted = await requestNotificationPermissions(promptForPermission);
   if (!granted || Platform.OS === 'web') {
     return { scheduledCount: 0, permissionsGranted: granted };
   }

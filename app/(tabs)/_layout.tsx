@@ -11,9 +11,10 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="index" />
       <Tabs.Screen name="habits" />
-      <Tabs.Screen name="calendar" />
+      <Tabs.Screen name="faith" />
       <Tabs.Screen name="progress" />
       <Tabs.Screen name="more" />
+      <Tabs.Screen name="calendar" options={{ href: null }} />
     </Tabs>
   );
 }

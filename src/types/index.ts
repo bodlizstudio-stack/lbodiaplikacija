@@ -1,4 +1,5 @@
 export type LanguageCode = 'sl' | 'en';
+export type ThemeMode = 'dark' | 'light' | 'system';
 
 export type HabitCategory =
   | 'fitness'
@@ -113,9 +114,19 @@ export interface Affirmation {
   createdAt: string;
 }
 
+export type TransformationPhotoCategory =
+  | 'telesna_preobrazba'
+  | 'obraz'
+  | 'fitnes'
+  | 'zivljenjski_slog'
+  | 'spomini'
+  | 'drugo';
+
 export interface PhysiqueEntry {
   id: string;
   date: string; // YYYY-MM-DD
+  title?: string;
+  category?: TransformationPhotoCategory;
   weightKg?: number;
   waistCm?: number;
   bodyFatPct?: number;
@@ -125,6 +136,9 @@ export interface PhysiqueEntry {
   customPhotoUri?: string;
   customCategoryLabel?: string;
   notes: string;
+  milestoneThen?: string;
+  milestoneNow?: string;
+  milestoneLearned?: string;
   createdAt: string;
 }
 
@@ -139,14 +153,26 @@ export type BibleCategory =
   | 'gratitude'
   | 'patience'
   | 'courage'
-  | 'hope';
+  | 'hope'
+  | 'temptation'
+  | 'self_control'
+  | 'love'
+  | 'forgiveness'
+  | 'anxiety'
+  | 'trust';
 
 export interface BibleVerse {
   id: string;
   referenceEn: string;
   referenceSl: string;
   textEn: string; // KJV (Public Domain)
-  textSl: string; // Chraska / Classical Slovenian Public Domain Scripture
+  textSl: string; // Chraska / Classical Slovenian Public Domain Scripture (1914)
+  translationEn?: string;
+  translationSl?: string;
+  reflectionEn?: string;
+  reflectionSl?: string;
+  applicationEn?: string;
+  applicationSl?: string;
   testament: BibleTestament;
   category: BibleCategory;
   isFavorite?: boolean;
@@ -191,13 +217,24 @@ export interface WhyIStartedData {
   updatedAt: string;
 }
 
+export type JournalEntryType =
+  | 'daily_reflection'
+  | 'gratitude'
+  | 'prayer'
+  | 'personal_thoughts'
+  | 'milestone'
+  | 'lessons_learned';
+
 export interface DailyJournalEntry {
   date: string; // YYYY-MM-DD
+  entryType?: JournalEntryType;
   wentWell: string;
   wentWrong: string;
   doBetterTomorrow: string;
   feelings: string;
   gratitude: string;
+  prayerText?: string;
+  archived?: boolean;
   moodRating: number; // 1-5
   energyRating: number; // 1-5
   updatedAt: string;
@@ -207,12 +244,21 @@ export interface FocusSession {
   id: string;
   date: string; // YYYY-MM-DD
   durationMinutes: number;
+  taskTitle?: string;
   completed: boolean;
   startedAt: string;
   completedAt?: string;
 }
 
 export type GoalTimeframe = 'short' | 'monthly' | 'yearly' | 'life';
+export type GoalCategory =
+  | 'vera'
+  | 'zdravje'
+  | 'disciplina'
+  | 'izobrazba'
+  | 'delo'
+  | 'odnosi'
+  | 'osebna_rast';
 
 export interface GoalMilestone {
   id: string;
@@ -224,7 +270,9 @@ export interface Goal {
   id: string;
   title: string;
   description: string;
+  category?: GoalCategory;
   timeframe: GoalTimeframe;
+  startDate?: string; // YYYY-MM-DD
   targetDate: string; // YYYY-MM-DD
   progressPct: number; // 0-100
   milestones: GoalMilestone[];
@@ -255,9 +303,282 @@ export interface PastSelfEntry {
   createdAt: string;
 }
 
+// ---------- LBODI 2.0: Gratitude, Prayer, Reading Plans ----------
+export type GratitudeCategory =
+  | 'family'
+  | 'health'
+  | 'faith'
+  | 'friends'
+  | 'opportunities'
+  | 'growth'
+  | 'small_joys'
+  | 'other';
+
+export interface GratitudeEntry {
+  id: string;
+  date: string; // YYYY-MM-DD
+  mainText: string;
+  threeBlessings: string[];
+  dailyPrayer?: string;
+  category: GratitudeCategory;
+  photoUri?: string;
+  isFavorite: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PrayerStatus = 'in_prayer' | 'still_praying' | 'answered' | 'closed';
+export type PrayerCategory =
+  | 'gratitude'
+  | 'guidance'
+  | 'strength'
+  | 'family'
+  | 'forgiveness'
+  | 'other';
+
+export interface PrayerEntry {
+  id: string;
+  title: string;
+  text: string;
+  date: string; // YYYY-MM-DD
+  category: PrayerCategory;
+  status: PrayerStatus;
+  reflection?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BibleReadingDay {
+  dayNumber: number;
+  referenceSl: string;
+  referenceEn: string;
+  focusSl: string;
+  focusEn: string;
+}
+
+export interface BibleReadingPlan {
+  id: string;
+  titleSl: string;
+  titleEn: string;
+  descriptionSl: string;
+  descriptionEn: string;
+  durationDays: number;
+  days: BibleReadingDay[];
+}
+
+export interface DailyReflectionEntry {
+  date: string; // YYYY-MM-DD
+  question: string;
+  answer: string;
+  updatedAt: string;
+}
+
+// ---------- LBODI 2.0: Lifestyle Vision (14-Day System) ----------
+export interface LifestyleVisionSections {
+  faith: string;
+  bodyHealth: string;
+  discipline: string;
+  workPurpose: string;
+  relationships: string;
+  personalIdentity: string;
+}
+
+export interface IdealDayPlan {
+  morning: string;
+  workStudy: string;
+  fitness: string;
+  meals: string;
+  prayer: string;
+  evening: string;
+  sleep: string;
+}
+
+export interface LifestyleVisionVersion {
+  id: string;
+  versionNumber: number;
+  sections: LifestyleVisionSections;
+  idealDay: IdealDayPlan;
+  visionStatement: string;
+  isDraft: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BiweeklyVisionReview {
+  id: string;
+  date: string; // YYYY-MM-DD
+  visionVersionId: string;
+  closerToPerson: string;
+  spaceForGod: string;
+  doDifferently: string;
+  habitToImprove: string;
+  accomplishments: string;
+  challenges: string;
+  gratitude: string;
+  createdAt: string;
+}
+
+// ---------- LBODI 2.0: Fitness, Wellness & Nutrition ----------
+export interface WorkoutExercise {
+  id: string;
+  name: string;
+  sets: number;
+  reps: string;
+  weightKg?: number;
+}
+
+export interface WorkoutLog {
+  id: string;
+  date: string; // YYYY-MM-DD
+  category: string;
+  exercises: WorkoutExercise[];
+  durationMinutes?: number;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface DailyCheckIn {
+  date: string; // YYYY-MM-DD
+  sleepHours?: number;
+  energy: number; // 1-5
+  mood: number; // 1-5
+  stress: number; // 1-5
+  mainPriority?: string;
+  gratitudeQuick?: string;
+  reflection?: string;
+  updatedAt: string;
+}
+
+export type NutritionSource = 'manual' | 'import_csv' | 'import_json' | 'import_pdf';
+
+export interface NutritionEntry {
+  date: string; // YYYY-MM-DD
+  calories: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  source: NutritionSource;
+  notes?: string;
+  updatedAt: string;
+}
+
+export interface NutritionImportRecord {
+  id: string;
+  fileName: string;
+  format: 'csv' | 'json' | 'pdf';
+  importedDates: string[];
+  fingerprint: string;
+  importedAt: string;
+}
+
+export interface NutritionTargets {
+  calories: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+}
+
+// ---------- LBODI 2.0: Notifications, AI & Dashboard Customization ----------
+export type ReminderType =
+  | 'morning'
+  | 'midday'
+  | 'evening'
+  | 'biweekly_vision'
+  | 'morning_prayer'
+  | 'bible_reading'
+  | 'gratitude'
+  | 'fitness'
+  | 'water'
+  | 'study'
+  | 'weekly_review';
+
+export interface ReminderConfig {
+  id: string;
+  type: ReminderType;
+  enabled: boolean;
+  localTime: string; // HH:MM
+  timezone: string;
+  recurrence: 'daily' | 'weekly' | 'every_14_days';
+  anchorDate?: string; // YYYY-MM-DD
+  lastDeliveredDate?: string; // YYYY-MM-DD
+  channel: 'in_app' | 'web_push' | 'native';
+  updatedAt: string;
+}
+
+export interface InAppNotificationItem {
+  id: string;
+  reminderType: ReminderType;
+  title: string;
+  body: string;
+  date: string;
+  route: string;
+  read: boolean;
+  createdAt: string;
+}
+
+export interface CustomReminderMessage {
+  id: string;
+  textSl: string;
+  textEn: string;
+  scriptureRef?: string;
+  active: boolean;
+}
+
+export interface AIPrivacySettings {
+  allowHabits: boolean;
+  allowGoals: boolean;
+  allowVision: boolean;
+  allowWorkouts: boolean;
+  allowNutrition: boolean;
+  allowSleep: boolean;
+  allowJournal: boolean;
+  allowPrayers: boolean;
+  allowDisciplineTracker: boolean;
+}
+
+export interface AIMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+  model?: string;
+}
+
+export interface AIConversation {
+  id: string;
+  title: string;
+  messages: AIMessage[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type DashboardSectionId =
+  | 'scripture'
+  | 'dailyReflection'
+  | 'dailyProgress'
+  | 'quickActions'
+  | 'discipline'
+  | 'vision'
+  | 'nutrition'
+  | 'eveningReflection';
+
+export interface DashboardSectionConfig {
+  id: DashboardSectionId;
+  enabled: boolean;
+}
+
+export interface DisciplinePrivacySettings {
+  hideFromDashboard: boolean;
+  customTitle: string;
+  personalGoalDays: number;
+  personalReason: string;
+}
+
 export interface UserSettings {
   profileName: string;
   language: LanguageCode;
+  themeMode?: ThemeMode;
+  timezone?: string;
   preserveEnglishQuotes: boolean;
   onboardingCompleted: boolean;
   hardcoreMode: boolean;
@@ -284,4 +605,13 @@ export interface UserSettings {
   customQuotes: string[];
   lastMissedNotificationDate?: string;
   weeklyReviewDismissedForWeek?: string;
+  dashboardSections?: DashboardSectionConfig[];
+  disciplinePrivacy?: DisciplinePrivacySettings;
+  nutritionTargets?: NutritionTargets;
+  aiPrivacy?: AIPrivacySettings;
+  reminderConfigs?: ReminderConfig[];
+  customReminders?: CustomReminderMessage[];
+  visionReminderAnchorDate?: string;
+  visionReminderTime?: string;
+  webPushSubscribed?: boolean;
 }

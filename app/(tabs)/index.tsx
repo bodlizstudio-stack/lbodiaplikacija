@@ -1,31 +1,24 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useApp } from '../../src/store/AppContext';
-import { PerformanceHQShell } from '../../src/components/PerformanceHQShell';
+import { LBODIShell, CrossIcon, SacredDivider } from '../../src/components/LBODIShell';
+import { AUTHENTIC_BIBLE_VERSES } from '../../src/data/seedData';
 import {
-  AUTHENTIC_BIBLE_VERSES,
-  MISSED_TASK_NOTIFICATIONS,
-  MOTIVATIONAL_QUOTES,
-} from '../../src/data/seedData';
+  DAILY_REFLECTION_QUESTIONS,
+  DEFAULT_DASHBOARD_SECTIONS,
+  DEFAULT_DISCIPLINE_PRIVACY,
+  DEFAULT_NUTRITION_TARGETS,
+} from '../../src/data/faithData';
 import {
-  addDays,
   calculateCompletedDaysStreak,
+  calculateNext14DayReminder,
   calculateNoFapStreak,
-  getWeekBounds,
-  parseDateStringUTCNoon,
-  shouldSendMissedTaskNotification,
+  getDailyReflectionIndex,
+  getDailyScriptureIndex,
+  getLjubljanaHour,
+  isEveningHour,
 } from '../../src/utils/dateUtils';
-
-const CATEGORY_MATERIAL_ICONS: Record<string, string> = {
-  fitness: 'open_in_full',
-  nutrition: 'restaurant',
-  faith: 'menu_book',
-  mindset: 'edit_note',
-  study: 'school',
-  work: 'terminal',
-  recovery: 'bedtime',
-  discipline: 'shield',
-};
+import { DashboardSectionId } from '../../src/types';
 
 export default function HomeDashboardScreen() {
   const router = useRouter();
@@ -36,135 +29,158 @@ export default function HomeDashboardScreen() {
     toggleGymRestDay,
     getGymRestDaysUsedThisWeek,
     toggleFavoriteVerse,
+    saveDailyReflection,
+    updateDashboardSections,
+    pushInAppNotification,
   } = useApp();
 
   const lang = state.settings.language;
-  const preserveEn = state.settings.preserveEnglishQuotes;
-  const [restAlertMsg, setRestAlertMsg] = useState<string | null>(null);
+  const tz = state.settings.timezone || 'Europe/Ljubljana';
+  const localHour = getLjubljanaHour(new Date(), tz);
+  const isEvening = isEveningHour(tz);
 
-  // Live 1-second ticker for No Fap counter
+  const [restAlertMsg, setRestAlertMsg] = useState<string | null>(null);
+  const [customizeVisible, setCustomizeVisible] = useState(false);
+
+  // Live ticker only updates when viewing screen; streak itself derives from persisted startTimestamp
   const [nowMs, setNowMs] = useState(Date.now());
   useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    const id = setInterval(() => setNowMs(Date.now()), 60000);
     return () => clearInterval(id);
   }, []);
 
+  // Greeting by local time
+  const greetingText = useMemo(() => {
+    if (lang === 'en') {
+      if (localHour < 11) return 'Good morning, Luka.';
+      if (localHour < 18) return 'Good afternoon, Luka.';
+      return 'Good evening, Luka.';
+    }
+    if (localHour < 11) return 'Dobro jutro, Luka.';
+    if (localHour < 18) return 'Dober dan, Luka.';
+    return 'Dober večer, Luka.';
+  }, [lang, localHour]);
+
+  const greetingSubText = useMemo(() => {
+    if (lang === 'en') {
+      return isEvening
+        ? 'Close this day in peace, gratitude, and prayer.'
+        : 'God has given you another day to grow in Christ.';
+    }
+    return isEvening
+      ? 'Zaključi današnji dan v miru, hvaležnosti in molitvi.'
+      : 'Bog ti je podaril nov dan. Danes je nova priložnost za rast z Bogom.';
+  }, [lang, isEvening]);
+
+  // Deterministic Daily Scripture (does not shuffle on reload)
+  const verseOfTheDay = useMemo(() => {
+    const idx = getDailyScriptureIndex(todayDateStr, AUTHENTIC_BIBLE_VERSES.length);
+    return AUTHENTIC_BIBLE_VERSES[idx] || AUTHENTIC_BIBLE_VERSES[0];
+  }, [todayDateStr]);
+  const isVerseSaved = state.favoriteVerseIds.includes(verseOfTheDay.id);
+
+  // Deterministic Daily Reflection Question + inline saved answer
+  const reflectionQuestionObj = useMemo(() => {
+    const idx = getDailyReflectionIndex(todayDateStr, DAILY_REFLECTION_QUESTIONS.length);
+    return DAILY_REFLECTION_QUESTIONS[idx] || DAILY_REFLECTION_QUESTIONS[0];
+  }, [todayDateStr]);
+  const reflectionQuestionText =
+    lang === 'sl' ? reflectionQuestionObj.sl : reflectionQuestionObj.en;
+  const savedReflection = state.dailyReflections?.[todayDateStr];
+  const [reflectionAnswer, setReflectionAnswer] = useState(savedReflection?.answer || '');
+  const [reflectionSavedToast, setReflectionSavedToast] = useState(false);
+
+  useEffect(() => {
+    setReflectionAnswer(savedReflection?.answer || '');
+  }, [savedReflection?.answer, todayDateStr]);
+
+  // Daily progress & habits
+  const todayRecords = useMemo(
+    () => state.dailyHabitRecords.filter((r) => r.date === todayDateStr),
+    [state.dailyHabitRecords, todayDateStr]
+  );
+  const completedCount = todayRecords.filter((r) => r.completed).length;
+  const scheduledCount = todayRecords.length;
+  const completionPct =
+    scheduledCount > 0 ? Math.round((completedCount / scheduledCount) * 100) : 100;
+  const completedDaysStreak = useMemo(
+    () => calculateCompletedDaysStreak(state.dailySummaries, todayDateStr),
+    [state.dailySummaries, todayDateStr]
+  );
+  const gymRestUsedThisWeek = getGymRestDaysUsedThisWeek(todayDateStr);
+
+  // Discipline summary (No Fap / Purity)
+  const disciplinePrivacy = state.settings.disciplinePrivacy || DEFAULT_DISCIPLINE_PRIVACY;
   const nofapLive = useMemo(
     () => calculateNoFapStreak(state.nofapState.startTimestamp, nowMs),
     [state.nofapState.startTimestamp, nowMs]
   );
 
-  const todayRecords = useMemo(
-    () => state.dailyHabitRecords.filter((r) => r.date === todayDateStr),
-    [state.dailyHabitRecords, todayDateStr]
+  // Lifestyle Vision & 14-day schedule
+  const latestVision = state.visionVersions?.[0];
+  const visionTextPreview =
+    latestVision?.visionStatement ||
+    state.visionDraft?.visionStatement ||
+    (lang === 'sl'
+      ? 'Opiši življenje, ki ga z Božjo pomočjo gradiš vsak dan.'
+      : 'Define the Christian life and habits you are building step by step.');
+  const anchorDate = state.settings.visionReminderAnchorDate || todayDateStr;
+  const biweeklyStatus = useMemo(
+    () => calculateNext14DayReminder(anchorDate, todayDateStr),
+    [anchorDate, todayDateStr]
   );
 
-  const todaySummary = state.dailySummaries[todayDateStr] || {
-    date: todayDateStr,
-    scheduledCount: todayRecords.length,
-    completedCount: todayRecords.filter((r) => r.completed).length,
-    completionPct: 0,
-    disciplineScore: 0,
-    notes: '',
-    updatedAt: '',
+  // Trigger honest in-app reminder notification if 14-day vision review is due today
+  useEffect(() => {
+    if (biweeklyStatus.isDueToday) {
+      pushInAppNotification({
+        reminderType: 'biweekly_vision',
+        date: todayDateStr,
+        title: lang === 'sl' ? '14-dnevni pregled vizije' : '14-Day Lifestyle Vision Check',
+        body:
+          lang === 'sl'
+            ? 'Minilo je 14 dni. Poglej svojo vizijo in preveri, ali tvoje navade vodijo v pravo smer.'
+            : '14 days have passed. Revisit your lifestyle vision and align your habits.',
+        route: '/modals/vision',
+      });
+    }
+  }, [biweeklyStatus.isDueToday, todayDateStr, lang, pushInAppNotification]);
+
+  // Nutrition summary today
+  const todayNutrition = state.nutritionEntries?.[todayDateStr];
+  const nutritionTargets = state.settings.nutritionTargets || DEFAULT_NUTRITION_TARGETS;
+
+  // Section personalization
+  const sectionConfigs = useMemo(() => {
+    const raw = state.settings.dashboardSections;
+    if (raw && raw.length > 0) return raw;
+    return DEFAULT_DASHBOARD_SECTIONS;
+  }, [state.settings.dashboardSections]);
+
+  const moveSection = async (idx: number, delta: -1 | 1) => {
+    const targetIdx = idx + delta;
+    if (targetIdx < 0 || targetIdx >= sectionConfigs.length) return;
+    const copy = [...sectionConfigs];
+    const [moved] = copy.splice(idx, 1);
+    copy.splice(targetIdx, 0, moved);
+    await updateDashboardSections(copy);
   };
 
-  const completedDaysStreak = useMemo(
-    () => calculateCompletedDaysStreak(state.dailySummaries, todayDateStr),
-    [state.dailySummaries, todayDateStr]
-  );
+  const toggleSectionEnabled = async (id: DashboardSectionId) => {
+    const copy = sectionConfigs.map((s) =>
+      s.id === id ? { ...s, enabled: !s.enabled } : s
+    );
+    await updateDashboardSections(copy);
+  };
 
-  const gymRestUsedThisWeek = getGymRestDaysUsedThisWeek(todayDateStr);
-
-  const dynamicMotivation = useMemo(() => {
-    const pct = todaySummary.completionPct;
-    const bucket =
-      pct < 40
-        ? MOTIVATIONAL_QUOTES.lowCompletion
-        : pct < 85
-        ? MOTIVATIONAL_QUOTES.midCompletion
-        : MOTIVATIONAL_QUOTES.highCompletion;
-    const daySeed = Number(todayDateStr.replace(/-/g, '')) || 0;
-    const item = bucket[daySeed % bucket.length];
-    return preserveEn || lang === 'en' ? item.en : item.sl;
-  }, [todaySummary.completionPct, todayDateStr, preserveEn, lang]);
-
-  const verseOfTheDay = useMemo(() => {
-    return AUTHENTIC_BIBLE_VERSES[0];
-  }, []);
-
-  const isVerseSaved = state.favoriteVerseIds.includes(verseOfTheDay.id);
-
-  // Manifestation sessions today
-  const todayManifestations = useMemo(
-    () => state.manifestations.filter((m) => m.date === todayDateStr),
-    [state.manifestations, todayDateStr]
-  );
-  const manifDoneCount = todayManifestations.length;
-  const morningEntry = todayManifestations.find((m) => m.session === 'morning');
-  const afternoonEntry = todayManifestations.find((m) => m.session === 'afternoon');
-  const eveningEntry = todayManifestations.find((m) => m.session === 'evening');
-
-  // Weekly bounds for Physique Photo & Weekly Review status
-  const { weekStart, weekEnd } = useMemo(
-    () => getWeekBounds(todayDateStr),
-    [todayDateStr]
-  );
-
-  const weekNumber = useMemo(() => {
-    const d = parseDateStringUTCNoon(todayDateStr);
-    const start = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    const diff = d.getTime() - start.getTime();
-    return Math.ceil((diff / 86400000 + start.getUTCDay() + 1) / 7);
-  }, [todayDateStr]);
-
-  const hasPhotoThisWeek = useMemo(
-    () =>
-      state.physiqueEntries.some(
-        (p) =>
-          p.date >= weekStart &&
-          p.date <= weekEnd &&
-          Boolean(p.frontPhotoUri || p.sidePhotoUri || p.backPhotoUri || p.customPhotoUri)
-      ),
-    [state.physiqueEntries, weekStart, weekEnd]
-  );
-
-  const hasWeeklyReviewThisWeek = useMemo(
-    () => state.weeklyReviews.some((r) => r.weekStartDate === weekStart),
-    [state.weeklyReviews, weekStart]
-  );
-
-  // Yesterday missed-task check
-  const yesterdayStr = useMemo(() => addDays(todayDateStr, -1), [todayDateStr]);
-  const yesterdaySummary = state.dailySummaries[yesterdayStr];
-  const missedYesterday = useMemo(
-    () => shouldSendMissedTaskNotification(yesterdaySummary, undefined, yesterdayStr),
-    [yesterdaySummary, yesterdayStr]
-  );
-
-  const circumference = 276.46; // 2 * Math.PI * 44
-  const clampedPct = Math.max(0, Math.min(100, todaySummary.disciplineScore));
-  const strokeDashoffset = (
-    circumference -
-    (clampedPct / 100) * circumference
-  ).toFixed(2);
-
-  const executionPct =
-    todaySummary.scheduledCount > 0
-      ? Math.round((todaySummary.completedCount / todaySummary.scheduledCount) * 100)
-      : 0;
-
-  const handleGymRestClick = async (
-    e: React.MouseEvent,
-    habitId: string
-  ) => {
+  const handleGymRestClick = async (e: React.MouseEvent, habitId: string) => {
     e.stopPropagation();
     const res = await toggleGymRestDay(todayDateStr, habitId);
     if (!res.ok) {
       setRestAlertMsg(
         lang === 'sl'
-          ? 'Največ 2 dni počitka na teden sta že porabljena (2/2)! Danes ni izgovorov — pojdi na trening.'
-          : 'Maximum 2 rest days in one week already used (2/2)! No excuses today — get to the gym.'
+          ? 'Največ 2 dni počitka na teden sta že porabljena (2/2). Danes je priložnost za trening.'
+          : 'Maximum 2 rest days in one week already used (2/2).'
       );
       setTimeout(() => setRestAlertMsg(null), 4500);
     } else {
@@ -172,762 +188,585 @@ export default function HomeDashboardScreen() {
     }
   };
 
-  return (
-    <PerformanceHQShell>
-      {/* CARD 1: Futuristic Command Intent + Discipline Telemetry HUD Card */}
-      <section className="relative overflow-hidden rounded-xl bg-gradient-to-br from-surface-container-high via-surface-container to-surface-container-low p-space-md machined-border hud-reticle thermal-glow transition-all duration-300">
-        <div className="absolute -right-10 -top-10 w-40 h-40 bg-primary-container opacity-10 rounded-full blur-2xl pointer-events-none"></div>
+  const handleSaveReflection = async () => {
+    if (!reflectionAnswer.trim()) return;
+    await saveDailyReflection(todayDateStr, reflectionQuestionText, reflectionAnswer.trim());
+    setReflectionSavedToast(true);
+    setTimeout(() => setReflectionSavedToast(false), 2000);
+  };
 
-        {/* Micro Telemetry Header */}
-        <div className="flex justify-end mb-1.5">
-          <span className="text-[9px] font-mono text-primary/70 tracking-widest uppercase">
-            • [TEL:DISCIPLINE_CORE]
-          </span>
-        </div>
+  const circumference = 238.76; // 2 * Math.PI * 38
+  const strokeDashoffset = (
+    circumference -
+    (Math.min(100, Math.max(0, completionPct)) / 100) * circumference
+  ).toFixed(2);
 
-        {/* Top Status Badges */}
-        <div className="flex items-center justify-between gap-1.5 mb-2.5">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[10px] font-mono font-bold text-primary-container tracking-wider uppercase bg-primary-container/10 px-2 py-0.5 rounded border border-primary-container/40 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary-container"></span>
-              COMMAND INTENT
-            </span>
-            <span className="text-[10px] font-mono font-bold text-emerald-400 tracking-wider uppercase bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]"></span>
-              REIGN VERIFIED
-            </span>
-          </div>
-          <span className="text-[10px] font-mono font-bold text-on-surface bg-surface-container-highest px-2 py-0.5 rounded border border-outline-variant/50 tracking-widest uppercase">
-            DAY {String(Math.max(42, completedDaysStreak)).padStart(3, '0')}
-          </span>
-        </div>
+  const sectionLabels: Record<DashboardSectionId, string> = {
+    scripture: lang === 'sl' ? 'Današnja Božja beseda' : 'Daily Scripture',
+    dailyReflection: lang === 'sl' ? 'Dnevno razmišljanje' : 'Daily Reflection',
+    dailyProgress: lang === 'sl' ? 'Današnji napredek navad' : 'Daily Progress',
+    quickActions: lang === 'sl' ? 'Hitri dostop' : 'Quick Access',
+    discipline: disciplinePrivacy.customTitle || 'Disciplina in čistost',
+    vision: lang === 'sl' ? 'Življenje, ki ga gradim' : 'My Lifestyle Vision',
+    nutrition: lang === 'sl' ? 'Prehrana danes' : 'Today’s Nutrition',
+    eveningReflection: lang === 'sl' ? 'Večerni pregled in zahvala' : 'Evening Reflection',
+  };
 
-        {/* Main Headline */}
-        <h2 className="text-headline-lg-mobile font-headline-lg-mobile tracking-tight text-white">
-          GET UP. <span className="text-primary-container">NO EXCUSES.</span>
-        </h2>
-        <div className="flex items-center gap-2 mt-0.5">
-          <p className="text-[11px] font-mono text-on-surface-variant tracking-widest uppercase">
-            DON&apos;T FORGET WHY YOU STARTED
-          </p>
-          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-primary-container/20 text-primary border border-primary-container/30">
-            2088.REV
-          </span>
-        </div>
+  const orderedVisibleIds = useMemo(() => {
+    const ids = sectionConfigs.filter((s) => s.enabled).map((s) => s.id);
+    // In evening hours, naturally elevate eveningReflection closer to top (after scripture)
+    if (isEvening && ids.includes('eveningReflection')) {
+      const withoutEvening = ids.filter((id) => id !== 'eveningReflection');
+      const scripturePos = withoutEvening.indexOf('scripture');
+      withoutEvening.splice(scripturePos >= 0 ? scripturePos + 1 : 0, 0, 'eveningReflection');
+      return withoutEvening;
+    }
+    return ids;
+  }, [sectionConfigs, isEvening]);
 
-        {/* Integrated Discipline Ring & Execution Rate Box */}
-        <div className="mt-3.5 p-3.5 rounded-xl bg-surface-container-lowest/95 machined-border flex items-center gap-4">
-          {/* Segmented HUD Circular SVG Progress Ring */}
-          <div className="relative w-28 h-28 flex items-center justify-center flex-shrink-0">
-            <svg className="w-full h-full -rotate-90 transform" viewBox="0 0 104 104">
-              {/* Outer technical dashed ring */}
-              <circle
-                cx="52"
-                cy="52"
-                fill="transparent"
-                r="49"
-                stroke="rgba(249, 115, 22, 0.22)"
-                strokeDasharray="3 5"
-                strokeWidth="1"
-              ></circle>
-              <circle
-                cx="52"
-                cy="52"
-                fill="transparent"
-                r="44"
-                stroke="#16181D"
-                strokeWidth="8"
-              ></circle>
-              <defs>
-                <linearGradient id="thermalGradHud" x1="0%" x2="100%" y1="0%" y2="100%">
-                  <stop offset="0%" stopColor="#F97316"></stop>
-                  <stop offset="100%" stopColor="#FFB347"></stop>
-                </linearGradient>
-                <filter height="140%" id="glowHud" width="140%" x="-20%" y="-20%">
-                  <feDropShadow
-                    dx="0"
-                    dy="0"
-                    floodColor="#F97316"
-                    floodOpacity="0.8"
-                    stdDeviation="2.5"
-                  ></feDropShadow>
-                </filter>
-              </defs>
-              <circle
-                cx="52"
-                cy="52"
-                fill="transparent"
-                filter="url(#glowHud)"
-                r="44"
-                stroke="url(#thermalGradHud)"
-                strokeDasharray="276.46"
-                strokeDashoffset={strokeDashoffset}
-                strokeLinecap="butt"
-                strokeWidth="8"
-                style={{ transition: 'stroke-dashoffset 0.5s ease-out' }}
-              ></circle>
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-              <span className="text-headline-md font-headline-md text-white font-bold tracking-tight leading-none">
-                {clampedPct}%
-              </span>
-              <span className="text-[9px] font-mono text-on-surface-variant tracking-widest uppercase mt-1">
-                DISCIPLINE
-              </span>
-              <span className="text-[8px] font-mono text-emerald-400 tracking-widest uppercase mt-0.5">
-                NOMINAL
-              </span>
-            </div>
-          </div>
-
-          {/* Right Telemetry Column */}
-          <div className="flex-1 space-y-3">
-            <div
-              onClick={() => router.replace('/(tabs)/habits' as any)}
-              className="cursor-pointer"
-            >
-              <div className="flex justify-between items-center mb-1.5">
-                <span className="text-[10px] font-mono text-tertiary uppercase tracking-wider">
-                  EXEC_RATE // 01
-                </span>
-                <span className="text-[11px] font-mono text-white font-bold">
-                  <span className="text-primary-container">{todaySummary.completedCount}</span>/
-                  {todaySummary.scheduledCount} Done
-                </span>
-              </div>
-              <div className="w-full h-2 bg-surface-container-high rounded-sm overflow-hidden p-0.5 border border-primary-container/20">
-                <div
-                  className="h-full bg-gradient-to-r from-primary-container to-secondary transition-all duration-500 ease-out shadow-[0_0_8px_#F97316]"
-                  style={{ width: `${executionPct}%` }}
-                ></div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 pt-1.5 border-t border-surface-variant/40">
-              <div
-                onClick={() => router.replace('/(tabs)/progress' as any)}
-                className="cursor-pointer"
-              >
-                <span className="text-[9px] font-mono text-tertiary uppercase block">
-                  WEEKLY MOMENTUM
-                </span>
-                <span className="text-label-lg font-mono font-bold text-primary-container">
-                  +14.2%{' '}
-                  <span className="text-[10px] text-on-surface-variant font-normal">
-                    pace
-                  </span>
-                </span>
-              </div>
-              <div
-                onClick={() => router.push('/modals/focus' as any)}
-                className="cursor-pointer"
-              >
-                <span className="text-[9px] font-mono text-tertiary uppercase block">
-                  CURRENT TIER
-                </span>
-                <span className="text-label-lg font-headline-sm font-bold text-white">
-                  Sovereign
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Bottom System Log Quote */}
-        <div className="mt-3 pt-2.5 border-t border-surface-variant/50 flex items-center justify-between gap-2 text-[11px] font-mono">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-primary-container font-bold">&gt;</span>
-            <p className="text-on-surface italic truncate">
-              &ldquo;{dynamicMotivation}&rdquo;
-            </p>
-          </div>
-          <span className="text-[9px] font-mono text-tertiary flex-shrink-0">
-            [SYS.LOG]
-          </span>
-        </div>
-      </section>
-
-      {/* Conditional Missed-Task Accountability Alert */}
-      {missedYesterday && (
-        <section
-          onClick={() => router.replace('/(tabs)/calendar' as any)}
-          className="rounded-xl bg-error-container/30 border border-error/50 p-space-md machined-border hud-reticle cursor-pointer transition-opacity duration-200 hover:opacity-90"
-        >
-          <div className="flex items-center gap-3">
-            <span className="material-symbols-outlined text-error text-2xl">
-              warning
-            </span>
-            <div>
-              <p className="text-label-md font-mono text-error uppercase font-bold">
-                {state.settings.hardcoreMode
-                  ? MISSED_TASK_NOTIFICATIONS.hardcore[0].en
-                  : MISSED_TASK_NOTIFICATIONS.normal[0].en}
-              </p>
-              <p className="text-body-sm font-mono text-on-surface-variant mt-0.5">
-                Yesterday ({yesterdayStr}): {yesterdaySummary?.completedCount}/
-                {yesterdaySummary?.scheduledCount} completed. Tap to inspect.
-              </p>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* CARD 2: No Fap Sovereign Streak — Biometric Integrity Matrix */}
-      <section className="rounded-xl bg-gradient-to-r from-surface-container-high to-surface-container p-space-md machined-border hud-reticle relative overflow-hidden transition-all duration-200">
-        <div
-          onClick={() => router.push('/modals/nofap' as any)}
-          className="cursor-pointer"
-        >
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex items-center space-x-2.5">
-              <div className="w-9 h-9 rounded-lg bg-surface-container-lowest flex items-center justify-center machined-border border border-primary-container/40">
-                <span
-                  className="material-symbols-outlined text-primary-container text-lg"
-                  style={{ fontVariationSettings: "'FILL' 1" }}
-                >
-                  shield
-                </span>
-              </div>
-              <div>
-                <h3 className="text-headline-sm font-headline-sm text-white leading-tight">
-                  No Fap Sovereign Streak
-                </h3>
-                <span className="text-[9px] font-mono text-tertiary uppercase tracking-widest block mt-0.5">
-                  BIOMETRIC INTEGRITY MATRIX
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <span className="text-[9px] font-mono text-tertiary">0x42A</span>
-              <span className="px-2 py-1 text-[9px] font-mono font-bold text-primary-fixed-dim bg-primary-container/15 rounded border border-primary-container/40 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary-container animate-pulse"></span>
-                SHIELD ACTIVE
-              </span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-4 gap-2 my-space-sm">
-            {/* DAYS [01] */}
-            <div className="bg-surface-container-lowest p-2.5 rounded-lg machined-border flex flex-col justify-between">
-              <div className="flex justify-between items-center text-[8px] font-mono text-tertiary">
-                <span>DAYS</span>
-                <span>[01]</span>
-              </div>
-              <span className="text-headline-md font-headline-md text-white font-bold text-center my-1">
-                {nofapLive.days}
-              </span>
-              <span className="text-[8px] font-mono text-primary-container uppercase text-center tracking-wider">
-                CLEAN MATRIX
-              </span>
-            </div>
-
-            {/* HOURS [02] */}
-            <div className="bg-surface-container-lowest p-2.5 rounded-lg machined-border flex flex-col justify-between">
-              <div className="flex justify-between items-center text-[8px] font-mono text-tertiary">
-                <span>HOURS</span>
-                <span>[02]</span>
-              </div>
-              <span className="text-headline-md font-headline-md text-white font-bold text-center my-1">
-                {String(nofapLive.hours).padStart(2, '0')}
-              </span>
-              <span className="text-[8px] font-mono text-tertiary uppercase text-center tracking-wider">
-                ELAPSED
-              </span>
-            </div>
-
-            {/* MINS [03] */}
-            <div className="bg-surface-container-lowest p-2.5 rounded-lg machined-border flex flex-col justify-between">
-              <div className="flex justify-between items-center text-[8px] font-mono text-tertiary">
-                <span>MINS</span>
-                <span>[03]</span>
-              </div>
-              <span className="text-headline-md font-headline-md text-white font-bold text-center my-1">
-                {String(nofapLive.minutes).padStart(2, '0')}
-              </span>
-              <span className="text-[8px] font-mono text-tertiary uppercase text-center tracking-wider">
-                LOCKED
-              </span>
-            </div>
-
-            {/* SECS [04] */}
-            <div className="bg-surface-container-lowest p-2.5 rounded-lg machined-border flex flex-col justify-between">
-              <div className="flex justify-between items-center text-[8px] font-mono text-primary">
-                <span>SECS</span>
-                <span>[04]</span>
-              </div>
-              <span className="text-headline-md font-headline-md text-primary-container font-bold text-center my-1">
-                {String(nofapLive.seconds).padStart(2, '0')}
-              </span>
-              <span className="text-[8px] font-mono text-emerald-400 uppercase text-center tracking-wider">
-                LIVE
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Futuristic Scanline Emergency Protocol Trigger */}
-        <button
-          onClick={() => router.push('/modals/why-i-started' as any)}
-          className="w-full mt-2.5 py-2.5 px-3.5 hud-scanline-btn rounded-lg text-white font-mono text-[11px] font-bold flex items-center justify-between shadow-lg hover:shadow-primary-container/40 transition-all duration-200 active:scale-[0.99] border border-primary-fixed/40"
-        >
-          <div className="flex items-center gap-2.5 text-left">
-            <span className="material-symbols-outlined text-lg text-white">
-              warning
-            </span>
-            <span className="tracking-wider uppercase leading-tight">
-              OVERRIDE: INITIATE EMERGENCY PROTOCOL
-            </span>
-          </div>
-          <span className="px-2 py-1 rounded bg-black/60 border border-white/20 text-[9px] font-mono text-primary-fixed tracking-widest uppercase flex-shrink-0">
-            TR-WHY
-          </span>
-        </button>
-      </section>
-
-      {/* CARD 3: Daily Execution Order [OP_CODE: 888] — Priority Missions */}
-      <section className="rounded-xl bg-surface-container p-space-md machined-border hud-reticle">
-        <div className="flex justify-between items-start mb-space-sm">
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-mono uppercase tracking-widest text-primary-container font-bold">
-                DAILY EXECUTION ORDER
-              </span>
-              <span className="text-[9px] font-mono text-tertiary">
-                [OP_CODE: 888]
-              </span>
-            </div>
-            <h3 className="text-headline-sm font-headline-sm text-white mt-0.5">
-              Priority Missions
-            </h3>
-          </div>
-          <button
-            onClick={() => router.replace('/(tabs)/habits' as any)}
-            className="px-2.5 py-1 rounded bg-surface-container-highest text-[10px] font-mono font-bold text-primary border border-primary-container/30 hover:bg-surface-bright transition-colors uppercase"
+  const renderSection = (id: DashboardSectionId) => {
+    switch (id) {
+      case 'scripture':
+        return (
+          <section
+            key="scripture"
+            className="lbodi-card thermal-top-edge p-4 sm:p-5 space-y-3 relative overflow-hidden"
           >
-            {todaySummary.completedCount}/{todaySummary.scheduledCount} COMPLETED
-          </button>
-        </div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-[var(--accent-gold)]">
+                <CrossIcon size={14} />
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em]">
+                  {lang === 'sl' ? 'Današnja Božja beseda' : 'Daily Scripture'}
+                </span>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--bg-elevated)] text-[var(--text-muted)] border border-[var(--border-subtle)]">
+                {lang === 'sl'
+                  ? verseOfTheDay.translationSl || 'Chraska'
+                  : verseOfTheDay.translationEn || 'KJV'}
+              </span>
+            </div>
 
-        {restAlertMsg && (
-          <div className="mb-3 p-2.5 rounded-lg bg-error-container/40 border border-error text-error text-[11px] font-mono flex items-center gap-2 hq-page-fade">
-            <span className="material-symbols-outlined text-base">warning</span>
-            <span>{restAlertMsg}</span>
-          </div>
-        )}
+            <blockquote className="font-sacred text-xl sm:text-2xl leading-snug text-[var(--text-main)] italic">
+              &ldquo;{lang === 'sl' ? verseOfTheDay.textSl : verseOfTheDay.textEn}&rdquo;
+            </blockquote>
 
-        <div className="space-y-2.5">
-          {todayRecords.slice(0, 6).map((rec, idx) => {
-            const matIcon =
-              CATEGORY_MATERIAL_ICONS[rec.habitCategorySnapshot] || 'check_circle';
-            const displayTitle =
-              lang === 'en' && rec.habitTitleSnapshot.includes('/')
-                ? rec.habitTitleSnapshot.split('/')[1].trim()
-                : rec.habitTitleSnapshot.split('/')[0].trim();
+            <p className="text-xs font-semibold text-[var(--accent-gold)] tracking-wide">
+              {lang === 'sl' ? verseOfTheDay.referenceSl : verseOfTheDay.referenceEn}
+            </p>
 
-            const isGymHabit =
-              rec.habitId === 'habit-gym' ||
-              rec.habitCategorySnapshot === 'fitness' ||
-              rec.habitTitleSnapshot.toLowerCase().includes('gym') ||
-              rec.habitTitleSnapshot.toLowerCase().includes('fitnes');
+            {(verseOfTheDay.reflectionSl || verseOfTheDay.reflectionEn) && (
+              <p className="text-xs text-[var(--text-muted)] leading-relaxed pt-2 border-t border-[var(--border-subtle)]">
+                {lang === 'sl' ? verseOfTheDay.reflectionSl : verseOfTheDay.reflectionEn}
+              </p>
+            )}
 
-            const isRestDayToday = Boolean(
-              rec.isRestDay || rec.notes === 'GYM_REST_DAY'
-            );
-
-            const missionCode = `[M_0${idx + 1}]`;
-
-            return (
-              <div
-                key={rec.id}
-                className={`rounded-lg machined-border transition-all duration-200 ${
-                  rec.completed
-                    ? 'bg-surface-container-low/90'
-                    : 'bg-surface-container-high border-l-2 border-l-primary-container'
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                onClick={() => router.replace('/(tabs)/faith' as any)}
+                className="px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--text-main)] hover:border-[var(--border-gold)] transition-colors"
+              >
+                {lang === 'sl' ? 'Preberi več' : 'Read More'}
+              </button>
+              <button
+                onClick={() => toggleFavoriteVerse(verseOfTheDay.id)}
+                className={`px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1 transition-colors ${
+                  isVerseSaved
+                    ? 'bg-[var(--accent-gold)]/15 border-[var(--border-gold)] text-[var(--accent-gold)]'
+                    : 'bg-[var(--bg-elevated)] border-[var(--border-subtle)] text-[var(--text-muted)]'
                 }`}
               >
-                <div
-                  onClick={() => toggleHabitCompletion(todayDateStr, rec.habitId)}
-                  className="flex items-center justify-between p-3 cursor-pointer hover:opacity-95 transition-opacity"
+                <span
+                  className="material-symbols-outlined text-sm"
+                  style={isVerseSaved ? { fontVariationSettings: "'FILL' 1" } : undefined}
                 >
-                  <div className="flex items-center space-x-3 min-w-0 pr-2">
-                    {rec.completed ? (
-                      <div
-                        className={`w-6 h-6 rounded flex items-center justify-center shadow-[0_0_10px_rgba(249,115,22,0.5)] flex-shrink-0 transition-transform duration-200 ${
-                          isRestDayToday
-                            ? 'bg-secondary-container text-white'
-                            : 'bg-primary-container text-on-primary-container'
-                        }`}
-                      >
-                        <span className="material-symbols-outlined text-sm font-bold">
-                          {isRestDayToday ? 'bedtime' : 'check'}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="w-6 h-6 rounded bg-surface-container-lowest border border-outline-variant flex items-center justify-center hover:border-primary-container transition-colors flex-shrink-0"></div>
-                    )}
+                  bookmark
+                </span>
+                <span>{isVerseSaved ? (lang === 'sl' ? 'Shranjeno' : 'Saved') : (lang === 'sl' ? 'Shrani' : 'Save')}</span>
+              </button>
+              <button
+                onClick={() => router.push('/modals/journal' as any)}
+                className="px-3 py-1.5 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--accent-olive)] hover:border-[var(--accent-olive)] transition-colors"
+              >
+                {lang === 'sl' ? 'Razmisli' : 'Reflect'}
+              </button>
+            </div>
+          </section>
+        );
 
-                    <div className="min-w-0">
-                      <p
-                        className={`text-body-md font-body-md truncate transition-all ${
-                          rec.completed
-                            ? 'text-on-surface/80 line-through'
-                            : 'text-white font-semibold'
-                        }`}
-                      >
-                        {displayTitle}
-                      </p>
-                      <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-                        <span className="text-[10px] font-mono text-primary uppercase">
-                          {isRestDayToday
-                            ? `REST PROTOCOL • ${gymRestUsedThisWeek}/2 WK`
-                            : rec.completed
-                            ? `${rec.habitCategorySnapshot} • COMPLETED`
-                            : `SCHEDULED • ${rec.habitPrioritySnapshot}`}
+      case 'dailyReflection':
+        return (
+          <section key="dailyReflection" className="lbodi-card p-4 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--accent-olive)]">
+                {lang === 'sl' ? 'Dnevno vprašanje' : 'Daily Reflection'}
+              </span>
+              {reflectionSavedToast && (
+                <span className="text-[11px] font-medium text-emerald-400">
+                  {lang === 'sl' ? 'Shranjeno ✓' : 'Saved ✓'}
+                </span>
+              )}
+            </div>
+            <p className="font-sacred text-lg font-medium text-[var(--text-main)]">
+              {reflectionQuestionText}
+            </p>
+            <div className="flex gap-2">
+              <input
+                value={reflectionAnswer}
+                onChange={(e) => setReflectionAnswer(e.target.value)}
+                placeholder={
+                  lang === 'sl'
+                    ? 'Zapiši kratek, iskren odgovor...'
+                    : 'Write a brief, honest reflection...'
+                }
+                className="flex-1 rounded-xl bg-[var(--bg-lowest)] border border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-main)] focus:border-[var(--accent-gold)] focus:outline-none"
+              />
+              <button
+                onClick={handleSaveReflection}
+                className="px-3.5 py-2 rounded-xl lbodi-gold-btn text-xs whitespace-nowrap"
+              >
+                {lang === 'sl' ? 'Shrani' : 'Save'}
+              </button>
+            </div>
+          </section>
+        );
+
+      case 'dailyProgress':
+        return (
+          <section key="dailyProgress" className="lbodi-card p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-[11px] uppercase tracking-wider text-[var(--text-muted)] font-semibold">
+                  {lang === 'sl' ? 'Današnji ritem' : 'Today’s Progress'}
+                </span>
+                <h3 className="text-base font-semibold text-[var(--text-main)]">
+                  {lang === 'sl' ? 'Navade in odgovornost' : 'Habits & Stewardship'}
+                </h3>
+              </div>
+              <button
+                onClick={() => router.replace('/(tabs)/habits' as any)}
+                className="text-xs font-medium text-[var(--accent-gold)] hover:underline"
+              >
+                {lang === 'sl' ? 'Vse navade →' : 'All Habits →'}
+              </button>
+            </div>
+
+            <div className="flex items-center gap-4 p-3 rounded-xl bg-[var(--bg-lowest)] border border-[var(--border-subtle)]">
+              <div className="relative w-20 h-20 flex items-center justify-center flex-shrink-0">
+                <svg className="w-full h-full -rotate-90" viewBox="0 0 88 88">
+                  <circle
+                    cx="44"
+                    cy="44"
+                    r="38"
+                    fill="transparent"
+                    stroke="var(--border-subtle)"
+                    strokeWidth="7"
+                  />
+                  <circle
+                    cx="44"
+                    cy="44"
+                    r="38"
+                    fill="transparent"
+                    stroke="var(--accent-gold)"
+                    strokeWidth="7"
+                    strokeLinecap="round"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={strokeDashoffset}
+                  />
+                </svg>
+                <span className="absolute text-base font-bold text-[var(--text-main)]">
+                  {completionPct}%
+                </span>
+              </div>
+
+              <div className="flex-1 min-w-0 space-y-1">
+                <p className="text-sm font-semibold text-[var(--text-main)]">
+                  {completedCount} / {scheduledCount}{' '}
+                  {lang === 'sl' ? 'opravljenih navad' : 'habits completed'}
+                </p>
+                <p className="text-xs text-[var(--text-muted)]">
+                  {lang === 'sl'
+                    ? `Doslednost: ${completedDaysStreak} dni zapored • Napredek, ne popolnost.`
+                    : `Consistency: ${completedDaysStreak} consecutive days • Progress, not perfection.`}
+                </p>
+              </div>
+            </div>
+
+            {restAlertMsg && (
+              <div className="p-2.5 rounded-xl bg-red-900/20 border border-red-400/40 text-red-300 text-xs">
+                {restAlertMsg}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {todayRecords.slice(0, 6).map((rec) => {
+                const displayTitle =
+                  lang === 'en' && rec.habitTitleSnapshot.includes('/')
+                    ? rec.habitTitleSnapshot.split('/')[1].trim()
+                    : rec.habitTitleSnapshot.split('/')[0].trim();
+
+                const isGymHabit =
+                  rec.habitId === 'habit-gym' ||
+                  rec.habitCategorySnapshot === 'fitness' ||
+                  rec.habitTitleSnapshot.toLowerCase().includes('gym') ||
+                  rec.habitTitleSnapshot.toLowerCase().includes('fitnes');
+                const isRestDayToday = Boolean(rec.isRestDay || rec.notes === 'GYM_REST_DAY');
+
+                return (
+                  <div
+                    key={rec.id}
+                    className="rounded-xl bg-[var(--bg-lowest)] border border-[var(--border-subtle)] overflow-hidden"
+                  >
+                    <div
+                      onClick={() => toggleHabitCompletion(todayDateStr, rec.habitId)}
+                      className="flex items-center justify-between p-3 cursor-pointer hover:bg-[var(--bg-elevated)]/40 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors ${
+                            rec.completed
+                              ? isRestDayToday
+                                ? 'bg-[var(--accent-olive)] text-white'
+                                : 'bg-[var(--accent-gold)] text-[#0B1220]'
+                              : 'border border-[var(--border-gold)] bg-transparent'
+                          }`}
+                        >
+                          {rec.completed && (
+                            <span className="material-symbols-outlined text-sm font-bold">
+                              {isRestDayToday ? 'bedtime' : 'check'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p
+                            className={`text-sm truncate ${
+                              rec.completed
+                                ? 'line-through text-[var(--text-muted)]'
+                                : 'text-[var(--text-main)] font-medium'
+                            }`}
+                          >
+                            {displayTitle}
+                          </p>
+                          {isRestDayToday && (
+                            <span className="text-[11px] text-[var(--accent-olive)]">
+                              {lang === 'sl'
+                                ? `Počitek zabeležen (${gymRestUsedThisWeek}/2 ta teden)`
+                                : `Rest day logged (${gymRestUsedThisWeek}/2 this week)`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {isGymHabit && (
+                      <div className="px-3 py-2 border-t border-[var(--border-subtle)] flex items-center justify-between gap-2 text-[11px] bg-[var(--bg-surface)]/50">
+                        <span className="text-[var(--text-muted)]">
+                          {lang === 'sl'
+                            ? `Počitek ta teden: ${gymRestUsedThisWeek}/2`
+                            : `Weekly rest days: ${gymRestUsedThisWeek}/2`}
                         </span>
-                        <span
-                          className={`text-[8px] font-mono px-1.5 py-0.2 rounded uppercase font-bold ${
+                        <button
+                          onClick={(e) => handleGymRestClick(e, rec.habitId)}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-colors ${
                             isRestDayToday
-                              ? 'bg-secondary/15 text-secondary border border-secondary/30'
-                              : rec.completed
-                              ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                              : 'bg-primary-container/15 text-primary-container border border-primary-container/30'
+                              ? 'bg-[var(--accent-olive)] text-white border-transparent'
+                              : 'border-[var(--border-subtle)] text-[var(--text-main)] bg-[var(--bg-elevated)]'
                           }`}
                         >
                           {isRestDayToday
-                            ? 'REST_OK'
-                            : rec.completed
-                            ? idx % 2 === 0
-                              ? 'LOGGED'
-                              : 'SYNCED'
-                            : 'PENDING'}
-                        </span>
+                            ? lang === 'sl'
+                              ? '✓ Počitek danes (Prekliči)'
+                              : '✓ Rest Today (Undo)'
+                            : lang === 'sl'
+                            ? 'Danes sem imel počitek'
+                            : 'I had a rest today'}
+                        </button>
                       </div>
-                    </div>
+                    )}
                   </div>
+                );
+              })}
+            </div>
+          </section>
+        );
 
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className="text-[9px] font-mono text-tertiary">
-                      {missionCode}
+      case 'quickActions':
+        return (
+          <section key="quickActions" className="grid grid-cols-3 gap-2.5">
+            {[
+              { label: lang === 'sl' ? 'Molitev' : 'Prayer', icon: 'favorite', route: '/(tabs)/faith' },
+              { label: lang === 'sl' ? 'Hvaležnost' : 'Gratitude', icon: 'volunteer_activism', route: '/modals/gratitude' },
+              { label: lang === 'sl' ? 'Navade' : 'Habits', icon: 'check_circle', route: '/(tabs)/habits' },
+              { label: lang === 'sl' ? 'Disciplina' : 'Discipline', icon: 'shield', route: '/modals/nofap' },
+              { label: lang === 'sl' ? 'Moj cilj' : 'My Goals', icon: 'flag', route: '/modals/goals' },
+              { label: lang === 'sl' ? 'Napredek' : 'Progress', icon: 'monitoring', route: '/(tabs)/progress' },
+            ].map((q) => (
+              <button
+                key={q.route}
+                onClick={() =>
+                  q.route.startsWith('/(tabs)')
+                    ? router.replace(q.route as any)
+                    : router.push(q.route as any)
+                }
+                className="lbodi-card p-3 flex flex-col items-center justify-center gap-1.5 hover:border-[var(--border-gold)] active:scale-95 transition-all"
+              >
+                <span className="material-symbols-outlined text-xl text-[var(--accent-gold)]">
+                  {q.icon}
+                </span>
+                <span className="text-xs font-medium text-[var(--text-main)]">{q.label}</span>
+              </button>
+            ))}
+          </section>
+        );
+
+      case 'discipline':
+        if (disciplinePrivacy.hideFromDashboard) return null;
+        return (
+          <section
+            key="discipline"
+            onClick={() => router.push('/modals/nofap' as any)}
+            className="lbodi-card p-4 cursor-pointer hover:border-[var(--border-gold)] transition-colors space-y-2.5"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[var(--accent-gold)]">shield</span>
+                <h3 className="text-sm font-semibold text-[var(--text-main)]">
+                  {disciplinePrivacy.customTitle || (lang === 'sl' ? 'Disciplina in čistost' : 'Purity & Self-Control')}
+                </h3>
+              </div>
+              <span className="text-xs font-bold text-[var(--accent-gold)]">
+                {nofapLive.days} {lang === 'sl' ? 'dni' : 'days'}
+              </span>
+            </div>
+            <p className="text-xs text-[var(--text-muted)]">
+              {lang === 'sl'
+                ? 'Tiha zvestoba in samokontrola vsak dan. Ko pride skušnjava, se obrni na Gospoda.'
+                : 'Quiet daily self-control and integrity. Turn to God whenever temptation knocks.'}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  router.push('/modals/nofap?emergency=1' as any);
+                }}
+                className="flex-1 py-2 rounded-xl lbodi-gold-btn text-xs"
+              >
+                {lang === 'sl' ? 'Potrebujem moč' : 'I Need Strength'}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  router.push('/modals/nofap' as any);
+                }}
+                className="px-3 py-2 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-xs text-[var(--text-main)]"
+              >
+                {lang === 'sl' ? 'Odpri' : 'Open'}
+              </button>
+            </div>
+          </section>
+        );
+
+      case 'vision':
+        return (
+          <section key="vision" className="lbodi-card p-4 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] uppercase tracking-wider text-[var(--accent-gold)] font-semibold">
+                {lang === 'sl' ? 'Življenje, ki ga gradim' : 'My God-Centered Vision'}
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--bg-elevated)] text-[var(--accent-olive)] font-semibold">
+                {biweeklyStatus.isDueToday
+                  ? lang === 'sl'
+                    ? 'Pregled danes'
+                    : 'Review Due Today'
+                  : lang === 'sl'
+                  ? `Pregled čez ${biweeklyStatus.daysUntil} dni`
+                  : `Review in ${biweeklyStatus.daysUntil}d`}
+              </span>
+            </div>
+            <p className="text-xs sm:text-sm text-[var(--text-main)] leading-relaxed line-clamp-3">
+              {visionTextPreview}
+            </p>
+            <button
+              onClick={() => router.push('/modals/vision' as any)}
+              className="px-3.5 py-2 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--accent-gold)] hover:border-[var(--border-gold)] transition-colors"
+            >
+              {lang === 'sl' ? 'Preberi svojo vizijo' : 'Read My Vision'}
+            </button>
+          </section>
+        );
+
+      case 'nutrition':
+        return (
+          <section
+            key="nutrition"
+            onClick={() => router.push('/modals/nutrition' as any)}
+            className="lbodi-card p-4 cursor-pointer hover:border-[var(--border-gold)] transition-colors"
+          >
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] uppercase tracking-wider text-[var(--text-muted)] font-semibold">
+                {lang === 'sl' ? 'Prehrana danes (Cal AI / Ročno)' : 'Nutrition Today'}
+              </span>
+              <span className="text-[11px] text-[var(--accent-gold)] font-medium">
+                {todayNutrition
+                  ? `${todayNutrition.calories} / ${nutritionTargets.calories} kcal`
+                  : lang === 'sl'
+                  ? 'Brez vnosa danes'
+                  : 'Not logged today'}
+              </span>
+            </div>
+            {todayNutrition ? (
+              <p className="text-xs text-[var(--text-muted)]">
+                B: {todayNutrition.proteinG}g / {nutritionTargets.proteinG}g • OH:{' '}
+                {todayNutrition.carbsG}g • M: {todayNutrition.fatG}g
+              </p>
+            ) : (
+              <p className="text-xs text-[var(--text-muted)]">
+                {lang === 'sl'
+                  ? 'Dotakni se za hiter ročni vnos ali uvoz izvoza iz Cal AI (CSV/JSON/PDF).'
+                  : 'Tap to log macros manually or import a Cal AI export.'}
+              </p>
+            )}
+          </section>
+        );
+
+      case 'eveningReflection':
+        return (
+          <section
+            key="eveningReflection"
+            className={`lbodi-card p-4 space-y-2.5 ${
+              isEvening ? 'border-[var(--border-gold)] thermal-glow' : ''
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[var(--accent-gold)] text-lg">
+                  nights_stay
+                </span>
+                <h3 className="text-sm font-semibold text-[var(--text-main)]">
+                  {lang === 'sl' ? 'Večerna umiritev in zahvala' : 'Evening Prayer & Gratitude'}
+                </h3>
+              </div>
+              {isEvening && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent-gold)]/15 text-[var(--accent-gold)] font-semibold">
+                  {lang === 'sl' ? 'Večer' : 'Evening'}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-[var(--text-muted)]">
+              {lang === 'sl'
+                ? 'Pred spanjem se zahvali Gospodu za blagoslove dneva, zapiši kratko molitev in pripravi srce na jutri.'
+                : 'Thank the Lord before rest, pray honestly, and finish a 30-second check-in.'}
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                onClick={() => router.push('/modals/gratitude' as any)}
+                className="py-2 px-2 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[11px] font-medium text-[var(--text-main)]"
+              >
+                {lang === 'sl' ? 'Hvaležnost' : 'Gratitude'}
+              </button>
+              <button
+                onClick={() => router.replace('/(tabs)/faith?tab=prayer' as any)}
+                className="py-2 px-2 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[11px] font-medium text-[var(--text-main)]"
+              >
+                {lang === 'sl' ? 'Večerna molitev' : 'Prayer'}
+              </button>
+              <button
+                onClick={() => router.push('/modals/fitness' as any)}
+                className="py-2 px-2 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[11px] font-medium text-[var(--text-main)]"
+              >
+                {lang === 'sl' ? 'Check-in (30s)' : 'Check-In'}
+              </button>
+            </div>
+          </section>
+        );
+    }
+  };
+
+  return (
+    <LBODIShell>
+      {/* Section A — Greeting */}
+      <section className="flex items-start justify-between gap-3 px-0.5">
+        <div>
+          <h1 className="font-sacred text-3xl sm:text-4xl font-semibold text-[var(--text-main)] tracking-tight leading-tight">
+            {greetingText}
+          </h1>
+          <p className="text-xs sm:text-sm text-[var(--text-muted)] mt-1">
+            {greetingSubText}
+          </p>
+        </div>
+
+        <button
+          onClick={() => setCustomizeVisible(true)}
+          className="px-2.5 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--accent-gold)] flex items-center gap-1 flex-shrink-0"
+          title={lang === 'sl' ? 'Prilagodi začetni zaslon' : 'Customize Home'}
+        >
+          <span className="material-symbols-outlined text-sm">dashboard_customize</span>
+          <span className="hidden sm:inline">{lang === 'sl' ? 'Prilagodi' : 'Layout'}</span>
+        </button>
+      </section>
+
+      <SacredDivider label={lang === 'sl' ? 'Vera pred strahom' : 'Walk With Christ'} />
+
+      {orderedVisibleIds.map((id) => renderSection(id))}
+
+      {/* Customize Home Layout Overlay */}
+      {customizeVisible && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md lbodi-card p-5 space-y-3 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold text-[var(--text-main)]">
+                {lang === 'sl' ? 'Prilagodi domači zaslon' : 'Customize Home Dashboard'}
+              </h3>
+              <button
+                onClick={() => setCustomizeVisible(false)}
+                className="text-[var(--text-muted)]"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <p className="text-xs text-[var(--text-muted)]">
+              {lang === 'sl'
+                ? 'Vklopi, izklopi ali spremeni vrstni red kartic.'
+                : 'Show, hide, or reorder dashboard sections.'}
+            </p>
+            <div className="space-y-2">
+              {sectionConfigs.map((sec, idx) => (
+                <div
+                  key={sec.id}
+                  className="p-2.5 rounded-xl bg-[var(--bg-lowest)] border border-[var(--border-subtle)] flex items-center justify-between gap-2"
+                >
+                  <label className="flex items-center gap-2.5 cursor-pointer flex-1">
+                    <input
+                      type="checkbox"
+                      checked={sec.enabled}
+                      onChange={() => toggleSectionEnabled(sec.id)}
+                      className="rounded accent-amber-500 w-4 h-4"
+                    />
+                    <span className="text-xs font-medium text-[var(--text-main)]">
+                      {sectionLabels[sec.id]}
                     </span>
-                    <span
-                      className={`material-symbols-outlined text-sm ${
-                        rec.completed ? 'text-on-surface-variant' : 'text-primary-container'
-                      }`}
-                    >
-                      {matIcon}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Gym Rest Day Bar (Max 2 Rest Days Per Week) */}
-                {isGymHabit && (
-                  <div className="px-3 pb-2.5 pt-1.5 border-t border-surface-variant/40 flex items-center justify-between gap-2 bg-surface-container-lowest/70 rounded-b-lg">
-                    <div className="flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-secondary text-xs">
-                        bedtime
-                      </span>
-                      <span className="text-[9px] font-mono text-on-surface-variant uppercase tracking-wider">
-                        {lang === 'sl'
-                          ? `REST_PROTOCOL: ${gymRestUsedThisWeek}/2 TA TEDEN`
-                          : `REST_PROTOCOL: ${gymRestUsedThisWeek}/2 THIS WEEK`}
-                      </span>
-                      <div className="flex items-center gap-1 ml-1">
-                        {[0, 1].map((slot) => (
-                          <span
-                            key={slot}
-                            className={`w-2 h-2 rounded-full ${
-                              slot < gymRestUsedThisWeek
-                                ? 'bg-secondary shadow-[0_0_6px_#ffb95a]'
-                                : 'bg-surface-variant'
-                            }`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-
+                  </label>
+                  <div className="flex items-center gap-1">
                     <button
-                      onClick={(e) => handleGymRestClick(e, rec.habitId)}
-                      className={`px-2 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider machined-border transition-all duration-200 active:scale-95 ${
-                        isRestDayToday
-                          ? 'bg-secondary-container text-white font-bold'
-                          : gymRestUsedThisWeek >= 2
-                          ? 'bg-surface-container text-tertiary opacity-60'
-                          : 'bg-surface-container-high text-secondary hover:bg-surface-bright'
-                      }`}
+                      onClick={() => moveSection(idx, -1)}
+                      disabled={idx === 0}
+                      className="p-1 rounded bg-[var(--bg-elevated)] text-[var(--text-muted)] disabled:opacity-30"
                     >
-                      {isRestDayToday
-                        ? lang === 'sl'
-                          ? '✓ Počitek (Prekliči)'
-                          : '✓ Rest Day (Undo)'
-                        : gymRestUsedThisWeek >= 2
-                        ? '2/2 MAX'
-                        : lang === 'sl'
-                        ? 'Danes počitek'
-                        : 'I had a rest today'}
+                      <span className="material-symbols-outlined text-sm">arrow_upward</span>
+                    </button>
+                    <button
+                      onClick={() => moveSection(idx, 1)}
+                      disabled={idx === sectionConfigs.length - 1}
+                      className="p-1 rounded bg-[var(--bg-elevated)] text-[var(--text-muted)] disabled:opacity-30"
+                    >
+                      <span className="material-symbols-outlined text-sm">arrow_downward</span>
                     </button>
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* CARD 4: Unified Spiritual & Mindset Protocol Card */}
-      <section className="rounded-xl bg-surface-container p-space-md machined-border hud-reticle space-y-4">
-        {/* Card Header */}
-        <div className="flex justify-between items-start">
-          <div className="flex items-center space-x-2">
-            <span
-              className="material-symbols-outlined text-primary-container"
-              style={{ fontVariationSettings: "'FILL' 1" }}
-            >
-              auto_awesome
-            </span>
-            <div>
-              <h3 className="text-headline-sm font-headline-sm text-white leading-tight">
-                Spiritual &amp; Mindset Protocol
-              </h3>
-              <span className="text-[9px] font-mono text-tertiary uppercase tracking-widest block mt-0.5">
-                SUBLIMINAL RE-ENGAGEMENT
-              </span>
-            </div>
-          </div>
-          <span className="text-[10px] font-mono font-bold text-secondary bg-secondary-container/20 border border-secondary/40 px-2.5 py-0.5 rounded">
-            {manifDoneCount}/3 LOCKED
-          </span>
-        </div>
-
-        {/* Sub-section 1: Manifestation Checkpoints */}
-        <div
-          onClick={() => router.push('/modals/manifestation' as any)}
-          className="cursor-pointer space-y-2"
-        >
-          <div className="flex justify-between items-center text-[10px] font-mono">
-            <span className="text-on-surface-variant uppercase tracking-wider">
-              MANIFESTATION CHECKPOINTS
-            </span>
-            <span className="text-primary-container">
-              Evening Locks {state.settings.manifestationEveningTime}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2">
-            {/* Morning */}
-            <div
-              className={`bg-surface-container-lowest p-2.5 rounded-lg text-center border transition-all duration-200 relative ${
-                morningEntry
-                  ? 'border-primary-container/50 shadow-[inset_0_1px_0_0_rgba(249,115,22,0.3)]'
-                  : 'border-outline-variant/40'
-              }`}
-            >
-              <div className="flex justify-end mb-0.5">
-                <span
-                  className={`text-[8px] font-mono font-bold uppercase ${
-                    morningEntry ? 'text-emerald-400' : 'text-secondary'
-                  }`}
-                >
-                  {morningEntry ? 'PASS' : 'ARMED'}
-                </span>
-              </div>
-              <span
-                className={`material-symbols-outlined text-base ${
-                  morningEntry ? 'text-primary-container' : 'text-tertiary'
-                }`}
-              >
-                {morningEntry ? 'check_circle' : 'schedule'}
-              </span>
-              <p className="text-label-md font-bold text-white mt-1">
-                Morning
-              </p>
-              <span className="text-[9px] font-mono text-primary-container block mt-0.5">
-                {morningEntry
-                  ? '07:15 AM'
-                  : `${state.settings.manifestationMorningTime} Lock`}
-              </span>
-            </div>
-
-            {/* Midday */}
-            <div
-              className={`bg-surface-container-lowest p-2.5 rounded-lg text-center border transition-all duration-200 relative ${
-                afternoonEntry
-                  ? 'border-primary-container/50 shadow-[inset_0_1px_0_0_rgba(249,115,22,0.3)]'
-                  : 'border-outline-variant/40'
-              }`}
-            >
-              <div className="flex justify-end mb-0.5">
-                <span
-                  className={`text-[8px] font-mono font-bold uppercase ${
-                    afternoonEntry ? 'text-emerald-400' : 'text-secondary'
-                  }`}
-                >
-                  {afternoonEntry ? 'PASS' : 'ARMED'}
-                </span>
-              </div>
-              <span
-                className={`material-symbols-outlined text-base ${
-                  afternoonEntry ? 'text-primary-container' : 'text-tertiary'
-                }`}
-              >
-                {afternoonEntry ? 'check_circle' : 'schedule'}
-              </span>
-              <p className="text-label-md font-bold text-white mt-1">
-                Midday
-              </p>
-              <span className="text-[9px] font-mono text-primary-container block mt-0.5">
-                {afternoonEntry
-                  ? '01:40 PM'
-                  : `${state.settings.manifestationAfternoonTime} Lock`}
-              </span>
-            </div>
-
-            {/* Evening */}
-            <div
-              className={`bg-surface-container-lowest p-2.5 rounded-lg text-center border transition-all duration-200 relative ${
-                eveningEntry
-                  ? 'border-primary-container/50 shadow-[inset_0_1px_0_0_rgba(249,115,22,0.3)]'
-                  : 'border-outline-variant/40'
-              }`}
-            >
-              <div className="flex justify-end mb-0.5">
-                <span
-                  className={`text-[8px] font-mono font-bold uppercase ${
-                    eveningEntry ? 'text-emerald-400' : 'text-secondary'
-                  }`}
-                >
-                  {eveningEntry ? 'PASS' : 'ARMED'}
-                </span>
-              </div>
-              <span
-                className={`material-symbols-outlined text-base ${
-                  eveningEntry ? 'text-primary-container' : 'text-tertiary'
-                }`}
-              >
-                {eveningEntry ? 'check_circle' : 'schedule'}
-              </span>
-              <p className="text-label-md font-bold text-white mt-1">
-                Evening
-              </p>
-              <span className="text-[9px] font-mono text-secondary block mt-0.5">
-                {eveningEntry
-                  ? '09:00 PM'
-                  : `${state.settings.manifestationEveningTime} Lock`}
-              </span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
-
-        {/* Sub-section 2: Bible Verse of the Day // 0XPHIL */}
-        <div className="rounded-xl bg-surface-container-lowest p-3.5 machined-border">
-          <div
-            onClick={() => router.push('/modals/bible' as any)}
-            className="cursor-pointer"
-          >
-            <div className="flex justify-between items-start mb-2">
-              <span className="text-[10px] font-mono text-primary-container font-bold tracking-wider uppercase flex items-center gap-1.5">
-                <span className="material-symbols-outlined text-sm">book_5</span>
-                <span>BIBLE VERSE OF THE DAY // 0XPHIL</span>
-              </span>
-              <span className="text-[8px] font-mono bg-surface-container-high text-tertiary px-2 py-0.5 rounded border border-outline-variant/40 uppercase flex-shrink-0">
-                {verseOfTheDay.testament === 'NT' ? 'NT // VERIFIED' : 'OT // VERIFIED'}
-              </span>
-            </div>
-            <blockquote className="text-body-md font-body-md text-white italic mb-2.5 leading-relaxed">
-              &ldquo;
-              {lang === 'sl' && !preserveEn
-                ? verseOfTheDay.textSl
-                : verseOfTheDay.textEn}
-              &rdquo;
-            </blockquote>
-          </div>
-
-          <div className="flex justify-between items-center pt-2 border-t border-surface-variant/40">
-            <span
-              onClick={() => router.push('/modals/bible' as any)}
-              className="text-[11px] font-mono text-primary-container font-bold uppercase tracking-wider cursor-pointer"
-            >
-              {lang === 'sl' && !preserveEn
-                ? verseOfTheDay.referenceSl
-                : verseOfTheDay.referenceEn}
-            </span>
-            <button
-              onClick={() => toggleFavoriteVerse(verseOfTheDay.id)}
-              className="px-2 py-0.5 rounded bg-surface-container-high border border-outline-variant/50 text-[9px] font-mono text-tertiary hover:text-white flex items-center gap-1 transition-colors uppercase"
-            >
-              <span
-                className="material-symbols-outlined text-xs text-primary"
-                style={
-                  isVerseSaved ? { fontVariationSettings: "'FILL' 1" } : undefined
-                }
-              >
-                bookmark
-              </span>
-              <span>{isVerseSaved ? 'SAVED' : 'SAVE'}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Sub-section 3: Weekly Accountability Grid */}
-        <div className="space-y-2 pt-1">
-          <div className="flex items-center justify-between text-[10px] font-mono">
-            <span className="text-on-surface-variant uppercase tracking-wider">
-              WEEKLY ACCOUNTABILITY GRID
-            </span>
-            <span className="text-primary-container font-bold uppercase">
-              CYCLE_{weekNumber}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2.5">
-            {/* Physique Check */}
-            <div
-              onClick={() => router.replace('/(tabs)/progress' as any)}
-              className="p-2.5 bg-surface-container-lowest rounded-lg machined-border cursor-pointer hover:bg-surface-container-high transition-colors flex items-center gap-2.5"
-            >
-              <div className="w-8 h-8 rounded-md bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0">
-                <span className="material-symbols-outlined text-base">
-                  {hasPhotoThisWeek ? 'verified' : 'photo_camera'}
-                </span>
-              </div>
-              <div className="min-w-0">
-                <p className="text-label-md font-bold text-white truncate">
-                  Physique Check
-                </p>
-                <span
-                  className={`text-[9px] font-mono block ${
-                    hasPhotoThisWeek ? 'text-emerald-400' : 'text-tertiary'
-                  }`}
-                >
-                  {hasPhotoThisWeek ? '07:45 AM OK' : 'MON CHECK DUE'}
-                </span>
-              </div>
-            </div>
-
-            {/* Weekly Review */}
-            <div
-              onClick={() => router.push('/modals/weekly-review' as any)}
-              className="p-2.5 bg-surface-container-lowest rounded-lg machined-border cursor-pointer hover:bg-surface-container-high transition-colors flex items-center gap-2.5"
-            >
-              <div className="w-8 h-8 rounded-md bg-secondary/10 border border-secondary/30 flex items-center justify-center text-secondary flex-shrink-0">
-                <span className="material-symbols-outlined text-base">
-                  {hasWeeklyReviewThisWeek ? 'task_alt' : 'event_upcoming'}
-                </span>
-              </div>
-              <div className="min-w-0">
-                <p className="text-label-md font-bold text-white truncate">
-                  Weekly Review
-                </p>
-                <span className="text-[9px] font-mono text-tertiary block">
-                  {hasWeeklyReviewThisWeek
-                    ? 'SUBMITTED OK'
-                    : `Sun ${state.settings.weeklyReviewTime} (6d)`}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-    </PerformanceHQShell>
+      )}
+    </LBODIShell>
   );
 }
