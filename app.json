@@ -1,0 +1,72 @@
+{
+  "expo": {
+    "name": "GET UP",
+    "slug": "get-up-luka",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "getup",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0B0D"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.lukabodlaj.getup",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "GET UP uses Face ID to protect your private journal, physique transformation photos, and streak records.",
+        "NSCameraUsageDescription": "GET UP uses the camera so you can take private physique transformation check-in photos.",
+        "NSPhotoLibraryUsageDescription": "GET UP accesses your photo library so you can attach progress photos and motivational images."
+      }
+    },
+    "android": {
+      "package": "com.lukabodlaj.getup",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#0A0B0D"
+      },
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED",
+        "SCHEDULE_EXACT_ALARM",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#F97316"
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow GET UP to use Face ID to unlock your private discipline headquarters."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow GET UP to select your private physique progress and motivation photos.",
+          "cameraPermission": "Allow GET UP to capture your weekly physique transformation photos."
+        }
+      ]
+    ]
+  }
+}
